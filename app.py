@@ -21,7 +21,12 @@ según las reglas médicas de la unidad y permite revisar y descargar la tabla a
 """)
 
 # Clave API desde secrets o input
-api_key = st.secrets.get("GEMINI_API_KEY", None)
+api_key = None
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    pass
 if not api_key:
     with st.sidebar:
         st.header("⚙️ Configuración")
