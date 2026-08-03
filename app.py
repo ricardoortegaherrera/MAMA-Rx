@@ -95,7 +95,7 @@ if uploaded_files and api_key:
 
                 # Usamos el modelo optimizado y capturamos respuesta
                 response = client.models.generate_content(
-                    model='gemini-2.0-flash',
+                    model='gemini-1.5-flash',
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTIONS,
