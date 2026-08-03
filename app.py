@@ -27,7 +27,7 @@ try:
 except Exception:
     pass
 
-# Muestra siempre la casilla en la barra lateral
+# Barra lateral de configuración
 st.sidebar.header("⚙️ Configuración")
 api_key = st.sidebar.text_input("Ingresa tu clave de API Gemini:", value=default_key, type="password")
 selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "2025", "2024"])
@@ -82,20 +82,16 @@ if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
         with st.spinner("Analizando documentos con el modelo médico de Gemini..."):
             try:
-                # 1. Configurar API Key
                 clean_api_key = api_key.strip()
                 genai.configure(api_key=clean_api_key)
 
-                # 2. Lectura de PDFs
                 texts = {}
                 for f in uploaded_files:
                     reader = PdfReader(f)
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                # 3. Asignar el modelo activo detectado en tu cuenta
                 selected_model = "models/gemini-3.5-flash"
-                st.write(f"🤖 Usando modelo: `{selected_model}`")
 
                 model = genai.GenerativeModel(
                     model_name=selected_model,
@@ -107,6 +103,37 @@ if uploaded_files and api_key:
                 response = model.generate_content(prompt)
 
                 st.session_state["result_json"] = response.text
+                st.success("✅ ¡Extracción completada! Revisa los datos en la tabla inferior antes de guardar.")
 
             except Exception as e:
                 st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
+
+# Sección de revisión y validación previa a la descarga
+if "result_json" in st.session_state:
+    st.markdown("---")
+    st.subheader("📋 Previsualización y Edición del Caso Extraído")
+    st.info("👇 **Revisa aquí los datos extraídos.** Puedes hacer doble clic en cualquier celda para corregir o completar información antes de descargar.")
+    
+    try:
+        raw_json = st.session_state["result_json"]
+        data = json.loads(raw_json)
+        
+        if isinstance(data, dict):
+            df_preview = pd.DataFrame([data])
+        else:
+            df_preview = pd.DataFrame(data)
+            
+        # Tabla interactiva
+        edited_df = st.data_editor(df_preview, num_rows="dynamic", use_container_width=True)
+        
+        st.markdown("---")
+        # Botón para descargar una vez revisado
+        csv = edited_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Confirmar Visto Bueno y Descargar como CSV (para Excel)",
+            data=csv,
+            file_name=f"extraccion_biopsia_{selected_year}.csv",
+            mime="text/csv"
+        )
+    except Exception as e:
+        st.error(f"Error al procesar la respuesta JSON: {e}")
