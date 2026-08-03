@@ -4,8 +4,7 @@ import json
 import pandas as pd
 import streamlit as st
 from pypdf import PdfReader
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 # Configuración de página Streamlit
 st.set_page_config(
@@ -90,17 +89,16 @@ if uploaded_files and api_key:
                     texts[f.name] = text
 
                 clean_api_key = api_key.strip()
-                client = genai.Client(api_key=clean_api_key)
-                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                genai.configure(api_key=clean_api_key)
 
-                response = client.models.generate_content(
-                    model='gemini-1.5-flash',
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTIONS,
-                        response_mime_type="application/json"
-                    )
+                model = genai.GenerativeModel(
+                    model_name="gemini-1.5-flash",
+                    system_instruction=SYSTEM_INSTRUCTIONS,
+                    generation_config={"response_mime_type": "application/json"}
                 )
+
+                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                response = model.generate_content(prompt)
 
                 st.session_state["result_json"] = response.text
 
