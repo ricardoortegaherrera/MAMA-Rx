@@ -20,19 +20,17 @@ Esta aplicación procesa los informes PDF (`...RX`, `...INCIS`, `...ESCIS`), ext
 según las reglas médicas de la unidad y permite revisar y descargar la tabla actualizada para tu Excel.
 """)
 
-# Clave API desde secrets o input directo
-api_key = None
+# Obtener clave de secrets si existe como valor por defecto
+default_key = ""
 try:
     if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
+        default_key = st.secrets["GEMINI_API_KEY"]
 except Exception:
     pass
 
-# Si no hay clave guardada en Secrets, pedirla en la barra lateral
-# Si no hay clave guardada en Secrets, pedirla en la barra lateral
-if not api_key:
-    st.sidebar.header("⚙️ Configuración")
-    api_key = st.sidebar.text_input("Ingresa tu clave de API Gemini:", type="password")
+# Muestra siempre la casilla en la barra lateral
+st.sidebar.header("⚙️ Configuración")
+api_key = st.sidebar.text_input("Ingresa tu clave de API Gemini:", value=default_key, type="password")
 selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "2025", "2024"])
 
 SYSTEM_INSTRUCTIONS = """
