@@ -86,20 +86,15 @@ if uploaded_files and api_key:
                 clean_api_key = api_key.strip()
                 genai.configure(api_key=clean_api_key)
 
-                # 2. Diagnóstico: Listar modelos disponibles en tu cuenta
-                st.write("🔍 **Buscando modelos compatibles con tu clave...**")
-                models_list = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                st.info(f"Modelos detectados en tu cuenta: {models_list}")
-
-                # 3. Lectura de PDFs
+                # 2. Lectura de PDFs
                 texts = {}
                 for f in uploaded_files:
                     reader = PdfReader(f)
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                # 4. Seleccionar automáticamente el primer modelo disponible que contenga 'gemini'
-                selected_model = next((m for m in models_list if "gemini" in m), "models/gemini-1.5-flash")
+                # 3. Asignar el modelo activo detectado en tu cuenta
+                selected_model = "models/gemini-3.5-flash"
                 st.write(f"🤖 Usando modelo: `{selected_model}`")
 
                 model = genai.GenerativeModel(
@@ -115,28 +110,3 @@ if uploaded_files and api_key:
 
             except Exception as e:
                 st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
-            except Exception as e:
-                st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
-
-if "result_json" in st.session_state:
-    st.subheader("📋 Previsualización y Edición del Caso Extraído")
-    st.info("Comprueba los datos antes de exportar. Puedes hacer doble clic en cualquier celda para corregir datos manualmente si hiciera falta.")
-    
-    try:
-        data = json.loads(st.session_state["result_json"])
-        if isinstance(data, dict):
-            df_preview = pd.DataFrame([data])
-        else:
-            df_preview = pd.DataFrame(data)
-            
-        edited_df = st.data_editor(df_preview, num_rows="dynamic", use_container_width=True)
-        
-        csv = edited_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Descargar datos como CSV (para Excel)",
-            data=csv,
-            file_name=f"extraccion_biopsia_{selected_year}.csv",
-            mime="text/csv"
-        )
-    except Exception as e:
-        st.error(f"Error al procesar la respuesta JSON: {e}")
