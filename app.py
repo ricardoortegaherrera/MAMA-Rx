@@ -93,9 +93,8 @@ if uploaded_files and api_key:
                 client = genai.Client(api_key=clean_api_key)
                 prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
-                # Usamos el modelo optimizado y capturamos respuesta
                 response = client.models.generate_content(
-                    model='gemini-1.5-flash-002',
+                    model='gemini-1.5-flash',
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTIONS,
