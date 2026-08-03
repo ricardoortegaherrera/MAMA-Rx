@@ -89,20 +89,21 @@ if uploaded_files and api_key:
                     texts[f.name] = text
 
                 clean_api_key = api_key.strip()
-                
-                # Forzamos la versión v1 de la API para evitar conflictos de v1beta
                 genai.configure(api_key=clean_api_key)
 
                 model = genai.GenerativeModel(
-                    model_name="models/gemini-1.5-flash-002", # Nombre con prefijo explícito de endpoint
+                    model_name="gemini-1.5-pro",
                     system_instruction=SYSTEM_INSTRUCTIONS,
                     generation_config={"response_mime_type": "application/json"}
                 )
 
                 prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
                 response = model.generate_content(prompt)
+
                 st.session_state["result_json"] = response.text
 
+            except Exception as e:
+                st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
             except Exception as e:
                 st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
 
