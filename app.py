@@ -82,26 +82,31 @@ uploaded_files = st.file_uploader("Sube o arrastra aquí los PDFs de la paciente
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
         with st.spinner("Analizando documentos con el modelo médico de Gemini..."):
-            texts = {}
-            for f in uploaded_files:
-                reader = PdfReader(f)
-                text = "\n".join([page.extract_text() or "" for page in reader.pages])
-                texts[f.name] = text
+            try:
+                texts = {}
+                for f in uploaded_files:
+                    reader = PdfReader(f)
+                    text = "\n".join([page.extract_text() or "" for page in reader.pages])
+                    texts[f.name] = text
 
-            clean_api_key = api_key.strip()
-            client = genai.Client(api_key=clean_api_key)
-            prompt = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                clean_api_key = api_key.strip()
+                client = genai.Client(api_key=clean_api_key)
+                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
-            response = client.models.generate_content(
-                model='gemini-2.0-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTIONS,
-                    response_mime_type="application/json"
+                # Usamos el modelo optimizado y capturamos respuesta
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTIONS,
+                        response_mime_type="application/json"
+                    )
                 )
-            )
 
-            st.session_state["result_json"] = response.text
+                st.session_state["result_json"] = response.text
+
+            except Exception as e:
+                st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
 
 if "result_json" in st.session_state:
     st.subheader("📋 Previsualización y Edición del Caso Extraído")
