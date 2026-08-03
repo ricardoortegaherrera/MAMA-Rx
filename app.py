@@ -92,7 +92,7 @@ if uploaded_files and api_key:
             prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-1.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTIONS,
@@ -115,13 +115,13 @@ if "result_json" in st.session_state:
             
         edited_df = st.data_editor(df_preview, num_rows="dynamic", use_container_width=True)
         
-        # Descarga en formato CSV o Excel para pegar en tu tabla
+        # Descarga en formato CSV
         csv = edited_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Descargar datos extraídos (CSV / Excel)",
+            label="📥 Descargar datos como CSV (para Excel)",
             data=csv,
-            file_name=f"caso_extraido_{selected_year}.csv",
-            mime="text/csv",
+            file_name=f"extraccion_biopsia_{selected_year}.csv",
+            mime="text/csv"
         )
     except Exception as e:
-        st.error(f"Error al estructurar los datos: {e}")
+        st.error(f"Error al procesar la respuesta JSON: {e}")
