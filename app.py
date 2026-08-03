@@ -92,7 +92,7 @@ if uploaded_files and api_key:
                 genai.configure(api_key=clean_api_key)
 
                 model = genai.GenerativeModel(
-                    model_name="gemini-1.5-flash",
+                    model_name="gemini-1.5-flash-latest",
                     system_instruction=SYSTEM_INSTRUCTIONS,
                     generation_config={"response_mime_type": "application/json"}
                 )
