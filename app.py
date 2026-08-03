@@ -82,17 +82,28 @@ if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
         with st.spinner("Analizando documentos con el modelo médico de Gemini..."):
             try:
+                # 1. Configurar API Key
+                clean_api_key = api_key.strip()
+                genai.configure(api_key=clean_api_key)
+
+                # 2. Diagnóstico: Listar modelos disponibles en tu cuenta
+                st.write("🔍 **Buscando modelos compatibles con tu clave...**")
+                models_list = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                st.info(f"Modelos detectados en tu cuenta: {models_list}")
+
+                # 3. Lectura de PDFs
                 texts = {}
                 for f in uploaded_files:
                     reader = PdfReader(f)
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                clean_api_key = api_key.strip()
-                genai.configure(api_key=clean_api_key)
+                # 4. Seleccionar automáticamente el primer modelo disponible que contenga 'gemini'
+                selected_model = next((m for m in models_list if "gemini" in m), "models/gemini-1.5-flash")
+                st.write(f"🤖 Usando modelo: `{selected_model}`")
 
                 model = genai.GenerativeModel(
-                    model_name="gemini-1.5-pro",
+                    model_name=selected_model,
                     system_instruction=SYSTEM_INSTRUCTIONS,
                     generation_config={"response_mime_type": "application/json"}
                 )
