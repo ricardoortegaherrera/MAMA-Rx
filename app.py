@@ -73,7 +73,10 @@ De los informes finalizados en ESCIS / Escis / escis (Hoja Quirúrgica / Escisio
 - RESULTADO_VACIAMIENTO: Si VACIAMIENTO_AXILAR es "No", la columna RESULTADO_VACIAMIENTO debe quedar COMPLETAMENTE VACÍA (null/sin texto). Si se hizo ("Sí"), indicar Positivo o Negativo.
 - Nota: Si el resultado AP final quirúrgico difiere del incisional, predomina el quirúrgico.
 
-DEBES DEVOLVER UN JSON ESTRICTO CON ESTOS CAMPOS PARA CADA PACIENTE ANALIZADA.
+REGLAS STRICTAS DE FORMATO DE SALIDA:
+- Devuelve UNICAMENTE un objeto JSON válido.
+- No uses comillas dobles dentro de los valores de texto a menos que estén escapadas.
+- No incluyas saltos de línea ni retornos de carro dentro de las cadenas de texto del JSON.
 """
 
 uploaded_files = st.file_uploader("Sube o arrastra aquí los PDFs de la paciente (RX, INCIS, ESCIS):", type=["pdf"], accept_multiple_files=True)
@@ -116,7 +119,11 @@ if "result_json" in st.session_state:
     
     try:
         raw_json = st.session_state["result_json"]
-        data = json.loads(raw_json)
+        
+        # Limpieza sintáctica previa para reparar saltos de línea o comillas huérfanas
+        cleaned_json = re.sub(r'[\r\n]+', ' ', raw_json)
+        
+        data = json.loads(cleaned_json)
         
         if isinstance(data, dict):
             df_preview = pd.DataFrame([data])
@@ -137,3 +144,6 @@ if "result_json" in st.session_state:
         )
     except Exception as e:
         st.error(f"Error al procesar la respuesta JSON: {e}")
+        # Mostrar la respuesta cruda en caso de que ocurra una anomalía para poder inspeccionarla
+        with st.expander("Ver respuesta del modelo (modo depuración)"):
+            st.code(st.session_state.get("result_json", ""))
