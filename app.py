@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 from pypdf import PdfReader
 import google.generativeai as genai
+import openpyxl
 
 # Configuración de página Streamlit
 st.set_page_config(
@@ -111,7 +112,7 @@ if uploaded_files and api_key:
                     generation_config={"response_mime_type": "application/json"}
                 )
 
-                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
                 response = model.generate_content(prompt)
 
                 st.session_state["result_json"] = response.text
@@ -140,32 +141,29 @@ if "result_json" in st.session_state:
         
         st.markdown("---")
         
-        # Si subió un Excel previo, anexamos la fila al libro de Excel
+        # Si se subió un Excel previo
         if excel_file is not None:
             excel_bytes = excel_file.getvalue()
+            wb = openpyxl.load_workbook(io.BytesIO(excel_bytes))
             
-            # Leemos todas las hojas existentes del Excel subido
-            with pd.ExcelWriter(io.BytesIO(), engine='openpyxl') as output:
-                xls = pd.ExcelFile(io.BytesIO(excel_bytes), engine='openpyxl')
-                sheet_names = xls.sheet_names
-                
-                output_buffer = io.BytesIO()
-                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-                    for sheet in sheet_names:
-                        df_sheet = pd.read_excel(xls, sheet_name=sheet)
-                        
-                        # Si la hoja coincide con el año seleccionado, anexamos la nueva fila
-                        if str(sheet).strip() == str(selected_year).strip():
-                            df_updated = pd.concat([df_sheet, edited_df], ignore_index=True)
-                            df_updated.to_excel(writer, sheet_name=sheet, index=False)
-                        else:
-                            df_sheet.to_excel(writer, sheet_name=sheet, index=False)
-                            
-                    # Si el año seleccionado no existía como pestaña, la creamos
-                    if str(selected_year).strip() not in [str(s).strip() for s in sheet_names]:
-                        edited_df.to_excel(writer, sheet_name=str(selected_year), index=False)
-
-                final_excel = output_buffer.getvalue()
+            target_sheet_name = str(selected_year).strip()
+            
+            # Si no existe la pestaña del año seleccionado, la creamos
+            if target_sheet_name not in wb.sheetnames:
+                ws = wb.create_sheet(title=target_sheet_name)
+                # Escribir cabeceras
+                ws.append(list(edited_df.columns))
+            else:
+                ws = wb[target_sheet_name]
+            
+            # Anexar las filas editadas
+            for _, row in edited_df.iterrows():
+                ws.append(row.tolist())
+            
+            # Guardar en buffer de salida
+            output_buffer = io.BytesIO()
+            wb.save(output_buffer)
+            final_excel = output_buffer.getvalue()
 
             st.download_button(
                 label=f"📥 Confirmar Visto Bueno y Descargar Excel Completo Actualizado ({selected_year})",
@@ -174,7 +172,7 @@ if "result_json" in st.session_state:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            # Si no subió Excel, descargamos sólo la fila nueva en CSV
+            # Si no subió Excel, se descarga como CSV
             csv = edited_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Confirmar Visto Bueno y Descargar Caso como CSV",
@@ -185,6 +183,3 @@ if "result_json" in st.session_state:
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
-        # Mostrar la respuesta cruda en caso de que ocurra una anomalía para poder inspeccionarla
-        with st.expander("Ver respuesta del modelo (modo depuración)"):
-            st.code(st.session_state.get("result_json", ""))
