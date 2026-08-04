@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import io
 import pandas as pd
 import streamlit as st
 from pypdf import PdfReader
@@ -16,7 +17,7 @@ st.set_page_config(
 st.title("🩺 Gestor de Biopsias de Mama - Extracción y Registro")
 st.markdown("""
 Esta aplicación procesa los informes PDF (`...RX`, `...INCIS`, `...ESCIS`), extrae la información estructurada
-según las reglas médicas de la unidad y permite revisar y descargar la tabla actualizada para tu Excel.
+según las reglas médicas de la unidad y anexa los datos directamente a tu libro de Excel original.
 """)
 
 # Obtener clave de secrets si existe como valor por defecto
@@ -73,13 +74,21 @@ De los informes finalizados en ESCIS / Escis / escis (Hoja Quirúrgica / Escisio
 - RESULTADO_VACIAMIENTO: Si VACIAMIENTO_AXILAR es "No", la columna RESULTADO_VACIAMIENTO debe quedar COMPLETAMENTE VACÍA (null/sin texto). Si se hizo ("Sí"), indicar Positivo o Negativo.
 - Nota: Si el resultado AP final quirúrgico difiere del incisional, predomina el quirúrgico.
 
-REGLAS STRICTAS DE FORMATO DE SALIDA:
-- Devuelve UNICAMENTE un objeto JSON válido.
-- No uses comillas dobles dentro de los valores de texto a menos que estén escapadas.
-- No incluyas saltos de línea ni retornos de carro dentro de las cadenas de texto del JSON.
+REGLAS ESTRUCTURALES DE SALIDA:
+- Devuelve ÚNICAMENTE un objeto JSON válido.
+- No uses comillas dobles dentro de los valores de texto.
+- No incluyas saltos de línea dentro de los campos.
 """
 
-uploaded_files = st.file_uploader("Sube o arrastra aquí los PDFs de la paciente (RX, INCIS, ESCIS):", type=["pdf"], accept_multiple_files=True)
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### 1. Archivo Excel Registro (Opcional)")
+    excel_file = st.file_uploader("Sube tu Excel máster existente (.xlsx):", type=["xlsx"])
+
+with col2:
+    st.markdown("### 2. Informes PDF de la paciente")
+    uploaded_files = st.file_uploader("Sube los PDFs (RX, INCIS, ESCIS):", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
@@ -106,44 +115,76 @@ if uploaded_files and api_key:
                 response = model.generate_content(prompt)
 
                 st.session_state["result_json"] = response.text
-                st.success("✅ ¡Extracción completada! Revisa los datos en la tabla inferior antes de guardar.")
+                st.success("✅ ¡Extracción completada! Revisa los datos en la tabla inferior.")
 
             except Exception as e:
                 st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
 
-# Sección de revisión y validación previa a la descarga
+# Sección de revisión y exportación
 if "result_json" in st.session_state:
     st.markdown("---")
     st.subheader("📋 Previsualización y Edición del Caso Extraído")
-    st.info("👇 **Revisa aquí los datos extraídos.** Puedes hacer doble clic en cualquier celda para corregir o completar información antes de descargar.")
+    st.info("👇 **Revisa aquí los datos extraídos.** Puedes modificar cualquier celda directamente en la tabla.")
     
     try:
         raw_json = st.session_state["result_json"]
-        
-        # Limpieza sintáctica previa para reparar saltos de línea o comillas huérfanas
         cleaned_json = re.sub(r'[\r\n]+', ' ', raw_json)
-        
         data = json.loads(cleaned_json)
         
         if isinstance(data, dict):
-            df_preview = pd.DataFrame([data])
+            new_df = pd.DataFrame([data])
         else:
-            df_preview = pd.DataFrame(data)
+            new_df = pd.DataFrame(data)
             
-        # Tabla interactiva
-        edited_df = st.data_editor(df_preview, num_rows="dynamic", use_container_width=True)
+        edited_df = st.data_editor(new_df, num_rows="dynamic", use_container_width=True)
         
         st.markdown("---")
-        # Botón para descargar una vez revisado
-        csv = edited_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Confirmar Visto Bueno y Descargar como CSV (para Excel)",
-            data=csv,
-            file_name=f"extraccion_biopsia_{selected_year}.csv",
-            mime="text/csv"
-        )
+        
+        # Si subió un Excel previo, anexamos la fila al libro de Excel
+        if excel_file is not None:
+            excel_bytes = excel_file.getvalue()
+            
+            # Leemos todas las hojas existentes del Excel subido
+            with pd.ExcelWriter(io.BytesIO(), engine='openpyxl') as output:
+                xls = pd.ExcelFile(io.BytesIO(excel_bytes), engine='openpyxl')
+                sheet_names = xls.sheet_names
+                
+                output_buffer = io.BytesIO()
+                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                    for sheet in sheet_names:
+                        df_sheet = pd.read_excel(xls, sheet_name=sheet)
+                        
+                        # Si la hoja coincide con el año seleccionado, anexamos la nueva fila
+                        if str(sheet).strip() == str(selected_year).strip():
+                            df_updated = pd.concat([df_sheet, edited_df], ignore_index=True)
+                            df_updated.to_excel(writer, sheet_name=sheet, index=False)
+                        else:
+                            df_sheet.to_excel(writer, sheet_name=sheet, index=False)
+                            
+                    # Si el año seleccionado no existía como pestaña, la creamos
+                    if str(selected_year).strip() not in [str(s).strip() for s in sheet_names]:
+                        edited_df.to_excel(writer, sheet_name=str(selected_year), index=False)
+
+                final_excel = output_buffer.getvalue()
+
+            st.download_button(
+                label=f"📥 Confirmar Visto Bueno y Descargar Excel Completo Actualizado ({selected_year})",
+                data=final_excel,
+                file_name=f"Registro_Biopsias_Actualizado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            # Si no subió Excel, descargamos sólo la fila nueva en CSV
+            csv = edited_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Confirmar Visto Bueno y Descargar Caso como CSV",
+                data=csv,
+                file_name=f"caso_extraido_{selected_year}.csv",
+                mime="text/csv"
+            )
+
     except Exception as e:
-        st.error(f"Error al procesar la respuesta JSON: {e}")
+        st.error(f"Error al procesar los datos: {e}")
         # Mostrar la respuesta cruda en caso de que ocurra una anomalía para poder inspeccionarla
         with st.expander("Ver respuesta del modelo (modo depuración)"):
             st.code(st.session_state.get("result_json", ""))
