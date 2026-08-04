@@ -50,10 +50,10 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - ASPECTO_MAMOGRAFICO: Descriptor mamográfico. Si solo hay eco, indicar "No mamografía".
 - MAMOGRAFIA_CON_CONTRASTE: "Sí" o "No" (MCE / MC).
 - BAV: "Sí" o "No" (Biopsia asistida por vacío / estereotaxia).
-- TAMAÑO_RX: Tamaño máximo en mamografía. Si no se describe en MX pero sí en Eco, usar Eco. Si solo en RM, usar RM.
+- TAMAÑO_RX: Tamaño máximo de la lesión expresado OBLIGATORIAMENTE EN CENTÍMETROS (cm). Si en el informe viene en milímetros (mm), conviértelo a centímetros (ejemplo: 15 mm -> 1.5 cm o 1.5). Si no se describe en MX pero sí en Eco, usar Eco. Si solo en RM, usar RM.
 - MULTICENTRICO: "Sí" o "No" (múltiples lesiones confirmadas en cuadrantes distintos).
 - MULTIFOCAL: "Sí" o "No" (varias lesiones en el mismo cuadrante).
-- BIRADS: Descriptor BIRADS (ej. IV, V).
+- BIRADS: Formato OBLIGATORIO escribiendo siempre 'BIRADS' seguido de un espacio y el número correspondiente (Opciones válidas: 'BIRADS 2', 'BIRADS 3', 'BIRADS 4', 'BIRADS 5'). Ejemplo: si pone V o 5, debes escribir 'BIRADS 5'.
 - RM: "Sí" o "No" (indicar si aporta más datos o "No realizada" si no consta).
 - ECO_AXILA_ACTO_UNICO: "Sí" o "No".
 - SOSPECHA_ECO_AXILAR: "Sí" o "No" (según informe radiológico).
@@ -61,7 +61,7 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - BAG_AXILA: "Sí" o "No" (con independencia del resultado).
 
 De los informes finalizados en INCIS / Incis / incis (Informe Anatomopatológico):
-- RESULTADO_AP_MAMA: Resultado AP de la lesión mamaria.
+- RESULTADO_AP_MAMA: Resultado AP de la lesión mamaria. Si se trata de un carcinoma ductal infiltrante, se debe especificar el GRADO HISTOLÓGICO si está disponible en el informe (ejemplo: 'Carcinoma ductal infiltrante G2' o 'Carcinoma ductal infiltrante Grado 2').
 - SUBCLASIFICACION_MOLECULAR: Marcadores moleculares (Luminal, HER2, Triple Negativo, etc.).
 - ESTADIO_ECOGRAFICO_AXILAR: N0, N1 o N2 (N1/N2 si biopsia/PAAF axilar es positiva).
 - RESULTADO_BIOPSIA_AXILAR: Positivo o Negativo para metástasis.
@@ -70,7 +70,7 @@ De los informes finalizados en ESCIS / Escis / escis (Hoja Quirúrgica / Escisio
 - GANGLIO_CENTINELA: "Sí" o "No".
 - RESULTADO_GANGLIO_CENTINELA: "Sí" si es positivo, "MICROMETÁSTASIS" si consta como tal. Células aisladas = Negativo.
 - VACIAMIENTO_AXILAR: "Sí" o "No".
-- RESULTADO_VACIAMIENTO: Positivo / Negativo.
+- RESULTADO_VACIAMIENTO: Si VACIAMIENTO_AXILAR es "No", la columna RESULTADO_VACIAMIENTO debe quedar COMPLETAMENTE VACÍA (null/sin texto). Si se hizo ("Sí"), indicar Positivo o Negativo.
 - Nota: Si el resultado AP final quirúrgico difiere del incisional, predomina el quirúrgico.
 
 DEBES DEVOLVER UN JSON ESTRICTO CON ESTOS CAMPOS PARA CADA PACIENTE ANALIZADA.
