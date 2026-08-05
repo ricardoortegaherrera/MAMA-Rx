@@ -63,7 +63,7 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - BAG_AXILA: "Sí" o "No" (con independencia del resultado).
 
 De los informes finalizados en INCIS / Incis / incis (Informe Anatomopatológico):
-- RESULTADO_AP_MAMA: Resultado AP de la lesión mamaria. Si se trata de un carcinoma ductal infiltrante, se debe especificar el GRADO HISTOLÓGICO si está disponible en el informe (ejemplo: 'Carcinoma ductal infiltrante G2' o 'Carcinoma ductal inteligente Grado 2').
+- RESULTADO_AP_MAMA: Resultado AP de la lesión mamaria. Si se trata de un carcinoma ductal infiltrante, se debe especificar el GRADO HISTOLÓGICO si está disponible en el informe (ejemplo: 'Carcinoma ductal infiltrante G2' o 'Carcinoma ductal infiltrante Grado 2').
 - SUBCLASIFICACION_MOLECULAR: Marcadores moleculares (Luminal, HER2, Triple Negativo, etc.).
 - ESTADIO_ECOGRAFICO_AXILAR: N0, N1 o N2 (N1/N2 si biopsia/PAAF axilar es positiva).
 - RESULTADO_BIOPSIA_AXILAR: Positivo o Negativo para metástasis.
@@ -91,7 +91,7 @@ with col2:
 
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
-        with st.spinner("Analizando documentos con el modelo médico de Gemini..."):
+        with st.spinner("Analizando documentos con la API de Gemini..."):
             try:
                 clean_api_key = api_key.strip()
                 genai.configure(api_key=clean_api_key)
@@ -102,8 +102,32 @@ if uploaded_files and api_key:
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                # Selección de modelo válido y configuración JSON
-                selected_model = "gemini-1.5-flash"
+                # SELECCIÓN AUTOMÁTICA DE MODELO DISPONIBLE
+                available_models = [
+                    m.name for m in genai.list_models() 
+                    if 'generateContent' in m.supported_generation_methods
+                ]
+                
+                selected_model = None
+                # Buscamos en orden de preferencia según disponibilidad real de la cuenta
+                candidates = [
+                    "models/gemini-2.0-flash-exp", 
+                    "models/gemini-1.5-flash-latest", 
+                    "models/gemini-1.5-pro", 
+                    "models/gemini-pro"
+                ]
+                for candidate in candidates:
+                    if candidate in available_models:
+                        selected_model = candidate
+                        break
+                
+                # Si ninguno de los candidatos estándar aparece, toma el primer modelo válido
+                if not selected_model and available_models:
+                    selected_model = available_models[0]
+                
+                if not selected_model:
+                    st.error("No se encontraron modelos disponibles para la clave de API introducida.")
+                    st.stop()
 
                 model = genai.GenerativeModel(
                     model_name=selected_model,
@@ -118,7 +142,7 @@ if uploaded_files and api_key:
                 response = model.generate_content(prompt)
 
                 st.session_state["result_json"] = response.text
-                st.success("✅ ¡Extracción completada! Revisa los datos en la tabla inferior.")
+                st.success(f"✅ ¡Extracción completada con éxito usando {selected_model}! Revisa los datos abajo.")
 
             except Exception as e:
                 st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
@@ -186,6 +210,9 @@ if "result_json" in st.session_state:
                 file_name=f"caso_extraido_{selected_year}.csv",
                 mime="text/csv"
             )
+
+    except Exception as e:
+        st.error(f"Error al procesar los datos: {e}")
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
