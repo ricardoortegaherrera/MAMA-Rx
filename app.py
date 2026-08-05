@@ -106,8 +106,6 @@ if uploaded_files and api_key:
 
                 # Lista de candidatos válidos en orden estricto de prioridad
                 model_candidates = [
-                   # Lista de candidatos con prefijo models/ para la API v1beta
-                model_candidates = [
                     "models/gemini-1.5-flash-002",
                     "models/gemini-1.5-flash",
                     "models/gemini-1.5-pro-002",
