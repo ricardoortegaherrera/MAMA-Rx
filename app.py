@@ -103,7 +103,7 @@ if uploaded_files and api_key:
                     texts[f.name] = text
 
                 # Selección de modelo válido y configuración JSON
-                selected_model = "gemini-1.5-flash"
+                selected_model = "gemini-2.0-flash"
 
                 model = genai.GenerativeModel(
                     model_name=selected_model,
