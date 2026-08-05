@@ -2,11 +2,10 @@ import os
 import re
 import json
 import io
+import requests
 import pandas as pd
 import streamlit as st
 from pypdf import PdfReader
-from google import genai
-from google.genai import types
 import openpyxl
 
 # Configuración de página Streamlit
@@ -92,10 +91,9 @@ with col2:
 
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
-        with st.spinner("Analizando documentos con la API de Gemini..."):
+        with st.spinner("Analizando documentos directamente con la API de Gemini..."):
             try:
                 clean_api_key = api_key.strip()
-                client = genai.Client(api_key=clean_api_key)
 
                 texts = {}
                 for f in uploaded_files:
@@ -103,35 +101,48 @@ if uploaded_files and api_key:
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
-                model_candidates = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-                response = None
+                # Modelos compatibles a consultar vía API REST directo (v1)
+                model_candidates = ["gemini-1.5-flash", "gemini-1.5-pro"]
+                
+                extracted_text = None
                 successful_model = None
                 last_error = ""
 
                 for model_name in model_candidates:
-                    try:
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                system_instruction=SYSTEM_INSTRUCTIONS,
-                                temperature=0.0,
-                                response_mime_type="application/json"
-                            )
-                        )
+                    url = f"https://generativelanguage.googleapis.com/v1/models/{model_name}:generateContent?key={clean_api_key}"
+                    headers = {"Content-Type": "application/json"}
+                    payload = {
+                        "contents": [
+                            {
+                                "parts": [{"text": prompt_text}]
+                            }
+                        ],
+                        "systemInstruction": {
+                            "parts": [{"text": SYSTEM_INSTRUCTIONS}]
+                        },
+                        "generationConfig": {
+                            "temperature": 0.0,
+                            "responseMimeType": "application/json"
+                        }
+                    }
+
+                    response = requests.post(url, headers=headers, json=payload)
+                    res_json = response.json()
+
+                    if response.status_code == 200 and "candidates" in res_json:
+                        extracted_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
                         successful_model = model_name
                         break
-                    except Exception as err:
-                        last_error = str(err)
-                        continue
+                    else:
+                        last_error = res_json.get("error", {}).get("message", response.text)
 
-                if not response or not successful_model:
-                    st.error(f"⚠️ No se pudo conectar con ningún modelo compatible. Último error: {last_error}")
+                if not extracted_text:
+                    st.error(f"⚠️ Error al conectar con la API de Gemini: {last_error}")
                     st.stop()
 
-                st.session_state["result_json"] = response.text
+                st.session_state["result_json"] = extracted_text
                 st.success(f"✅ ¡Extracción completada con éxito usando **{successful_model}**! Revisa los datos abajo.")
 
             except Exception as e:
@@ -200,6 +211,9 @@ if "result_json" in st.session_state:
                 file_name=f"caso_extraido_{selected_year}.csv",
                 mime="text/csv"
             )
+
+    except Exception as e:
+        st.error(f"Error al procesar los datos: {e}")
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
