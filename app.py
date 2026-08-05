@@ -102,22 +102,19 @@ if uploaded_files and api_key:
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
-                # Lista de candidatos con rutas completas compatibles con API v1beta
+                # Modelos compatibles estándar
                 model_candidates = [
-                    "models/gemini-1.5-flash",
-                    "models/gemini-1.5-flash-002",
-                    "models/gemini-1.5-pro",
-                    "models/gemini-1.5-pro-002",
-                    "models/gemini-pro"
+                    "gemini-1.5-flash",
+                    "gemini-2.0-flash",
+                    "gemini-1.5-pro"
                 ]
 
                 response = None
                 successful_model = None
                 last_error = ""
 
-                # Intenta ejecutar la petición probando cada modelo en orden
                 for model_name in model_candidates:
                     try:
                         model = genai.GenerativeModel(
@@ -130,7 +127,7 @@ if uploaded_files and api_key:
                         )
                         response = model.generate_content(prompt)
                         successful_model = model_name
-                        break  # Si tiene éxito, sale del bucle
+                        break
                     except Exception as err:
                         last_error = str(err)
                         continue
@@ -208,9 +205,6 @@ if "result_json" in st.session_state:
                 file_name=f"caso_extraido_{selected_year}.csv",
                 mime="text/csv"
             )
-
-    except Exception as e:
-        st.error(f"Error al procesar los datos: {e}")
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
