@@ -54,7 +54,7 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - BAV: "Sí" o "No" (Biopsia asistida por vacío / estereotaxia).
 - TAMAÑO_RX: Tamaño máximo de la lesión expresado OBLIGATORIAMENTE EN CENTÍMETROS (cm). Si en el informe viene en milímetros (mm), conviértelo a centímetros (ejemplo: 15 mm -> 1.5 cm o 1.5). Si no se describe en MX pero sí en Eco, usar Eco. Si solo en RM, usar RM.
 - MULTICENTRICO: "Sí" o "No" (múltiples lesiones confirmadas en cuadrantes distintos).
-- MULTIFOCAL: "Sí" o "No" (varias lesiones en el mismo cuadrante).
+- MULTIFOCAL: "Sí" or "No" (varias lesiones en el mismo cuadrante).
 - BIRADS: Formato OBLIGATORIO escribiendo siempre 'BIRADS' seguido de un espacio y el número correspondiente (Opciones válidas: 'BIRADS 2', 'BIRADS 3', 'BIRADS 4', 'BIRADS 5'). Ejemplo: si pone V o 5, debes escribir 'BIRADS 5'.
 - RM: "Sí" o "No" (indicar si aporta más datos o "No realizada" si no consta).
 - ECO_AXILA_ACTO_UNICO: "Sí" o "No".
@@ -102,50 +102,47 @@ if uploaded_files and api_key:
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                # SELECCIÓN AUTOMÁTICA DE MODELO DISPONIBLE
-                available_models = [
-                    m.name for m in genai.list_models() 
-                    if 'generateContent' in m.supported_generation_methods
+                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+
+                # Lista de candidatos válidos en orden estricto de prioridad
+                model_candidates = [
+                    "gemini-2.0-flash",
+                    "gemini-1.5-flash",
+                    "gemini-1.5-pro",
+                    "gemini-2.0-flash-exp"
                 ]
-                
-                selected_model = None
-                # Buscamos en orden de preferencia según disponibilidad real de la cuenta
-                candidates = [
-                    "models/gemini-2.0-flash-exp", 
-                    "models/gemini-1.5-flash-latest", 
-                    "models/gemini-1.5-pro", 
-                    "models/gemini-pro"
-                ]
-                for candidate in candidates:
-                    if candidate in available_models:
-                        selected_model = candidate
-                        break
-                
-                # Si ninguno de los candidatos estándar aparece, toma el primer modelo válido
-                if not selected_model and available_models:
-                    selected_model = available_models[0]
-                
-                if not selected_model:
-                    st.error("No se encontraron modelos disponibles para la clave de API introducida.")
+
+                response = None
+                successful_model = None
+                last_error = ""
+
+                # Intenta ejecutar la petición probando cada modelo en orden
+                for model_name in model_candidates:
+                    try:
+                        model = genai.GenerativeModel(
+                            model_name=model_name,
+                            system_instruction=SYSTEM_INSTRUCTIONS,
+                            generation_config={
+                                "temperature": 0.0,
+                                "response_mime_type": "application/json"
+                            }
+                        )
+                        response = model.generate_content(prompt)
+                        successful_model = model_name
+                        break  # Si tiene éxito, sale del bucle
+                    except Exception as err:
+                        last_error = str(err)
+                        continue
+
+                if not response or not successful_model:
+                    st.error(f"⚠️ No se pudo conectar con ningún modelo compatible. Último error: {last_error}")
                     st.stop()
 
-                model = genai.GenerativeModel(
-                    model_name=selected_model,
-                    system_instruction=SYSTEM_INSTRUCTIONS,
-                    generation_config={
-                        "temperature": 0.0,
-                        "response_mime_type": "application/json"
-                    }
-                )
-
-                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
-                response = model.generate_content(prompt)
-
                 st.session_state["result_json"] = response.text
-                st.success(f"✅ ¡Extracción completada con éxito usando {selected_model}! Revisa los datos abajo.")
+                st.success(f"✅ ¡Extracción completada con éxito usando **{successful_model}**! Revisa los datos abajo.")
 
             except Exception as e:
-                st.error(f"⚠️ Error al conectar con la API de Gemini: {str(e)}")
+                st.error(f"⚠️ Error general al procesar: {str(e)}")
 
 # Sección de revisión y exportación
 if "result_json" in st.session_state:
@@ -210,9 +207,6 @@ if "result_json" in st.session_state:
                 file_name=f"caso_extraido_{selected_year}.csv",
                 mime="text/csv"
             )
-
-    except Exception as e:
-        st.error(f"Error al procesar los datos: {e}")
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
