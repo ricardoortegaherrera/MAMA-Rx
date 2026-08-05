@@ -5,7 +5,8 @@ import io
 import pandas as pd
 import streamlit as st
 from pypdf import PdfReader
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import openpyxl
 
 # Configuración de página Streamlit
@@ -94,7 +95,7 @@ if uploaded_files and api_key:
         with st.spinner("Analizando documentos con la API de Gemini..."):
             try:
                 clean_api_key = api_key.strip()
-                genai.configure(api_key=clean_api_key)
+                client = genai.Client(api_key=clean_api_key)
 
                 texts = {}
                 for f in uploaded_files:
@@ -104,28 +105,22 @@ if uploaded_files and api_key:
 
                 prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
-                # Modelos compatibles estándar
-                model_candidates = [
-                    "gemini-1.5-flash",
-                    "gemini-2.0-flash",
-                    "gemini-1.5-pro"
-                ]
-
+                model_candidates = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
                 response = None
                 successful_model = None
                 last_error = ""
 
                 for model_name in model_candidates:
                     try:
-                        model = genai.GenerativeModel(
-                            model_name=model_name,
-                            system_instruction=SYSTEM_INSTRUCTIONS,
-                            generation_config={
-                                "temperature": 0.0,
-                                "response_mime_type": "application/json"
-                            }
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                system_instruction=SYSTEM_INSTRUCTIONS,
+                                temperature=0.0,
+                                response_mime_type="application/json"
+                            )
                         )
-                        response = model.generate_content(prompt)
                         successful_model = model_name
                         break
                     except Exception as err:
