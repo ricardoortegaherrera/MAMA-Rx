@@ -54,7 +54,7 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - BAV: "Sí" o "No" (Biopsia asistida por vacío / estereotaxia).
 - TAMAÑO_RX: Tamaño máximo de la lesión expresado OBLIGATORIAMENTE EN CENTÍMETROS (cm). Si en el informe viene en milímetros (mm), conviértelo a centímetros (ejemplo: 15 mm -> 1.5 cm o 1.5). Si no se describe en MX pero sí en Eco, usar Eco. Si solo en RM, usar RM.
 - MULTICENTRICO: "Sí" o "No" (múltiples lesiones confirmadas en cuadrantes distintos).
-- MULTIFOCAL: "Sí" or "No" (varias lesiones en el mismo cuadrante).
+- MULTIFOCAL: "Sí" o "No" (varias lesiones en el mismo cuadrante).
 - BIRADS: Formato OBLIGATORIO escribiendo siempre 'BIRADS' seguido de un espacio y el número correspondiente (Opciones válidas: 'BIRADS 2', 'BIRADS 3', 'BIRADS 4', 'BIRADS 5'). Ejemplo: si pone V o 5, debes escribir 'BIRADS 5'.
 - RM: "Sí" o "No" (indicar si aporta más datos o "No realizada" si no consta).
 - ECO_AXILA_ACTO_UNICO: "Sí" o "No".
@@ -102,14 +102,14 @@ if uploaded_files and api_key:
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
-                # Lista de candidatos válidos en orden estricto de prioridad
+                # Lista de candidatos con rutas completas compatibles con API v1beta
                 model_candidates = [
-                    "models/gemini-1.5-flash-002",
                     "models/gemini-1.5-flash",
-                    "models/gemini-1.5-pro-002",
+                    "models/gemini-1.5-flash-002",
                     "models/gemini-1.5-pro",
+                    "models/gemini-1.5-pro-002",
                     "models/gemini-pro"
                 ]
 
@@ -208,6 +208,9 @@ if "result_json" in st.session_state:
                 file_name=f"caso_extraido_{selected_year}.csv",
                 mime="text/csv"
             )
+
+    except Exception as e:
+        st.error(f"Error al procesar los datos: {e}")
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
