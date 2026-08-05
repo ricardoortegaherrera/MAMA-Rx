@@ -63,7 +63,7 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - BAG_AXILA: "Sí" o "No" (con independencia del resultado).
 
 De los informes finalizados en INCIS / Incis / incis (Informe Anatomopatológico):
-- RESULTADO_AP_MAMA: Resultado AP de la lesión mamaria. Si se trata de un carcinoma ductal infiltrante, se debe especificar el GRADO HISTOLÓGICO si está disponible en el informe (ejemplo: 'Carcinoma ductal infiltrante G2' o 'Carcinoma ductal infiltrante Grado 2').
+- RESULTADO_AP_MAMA: Resultado AP de la lesión mamaria. Si se trata de un carcinoma ductal infiltrante, se debe especificar el GRADO HISTOLÓGICO si está disponible en el informe (ejemplo: 'Carcinoma ductal infiltrante G2' o 'Carcinoma ductal inteligente Grado 2').
 - SUBCLASIFICACION_MOLECULAR: Marcadores moleculares (Luminal, HER2, Triple Negativo, etc.).
 - ESTADIO_ECOGRAFICO_AXILAR: N0, N1 o N2 (N1/N2 si biopsia/PAAF axilar es positiva).
 - RESULTADO_BIOPSIA_AXILAR: Positivo o Negativo para metástasis.
@@ -77,8 +77,6 @@ De los informes finalizados en ESCIS / Escis / escis (Hoja Quirúrgica / Escisio
 
 REGLAS ESTRUCTURALES DE SALIDA:
 - Devuelve ÚNICAMENTE un objeto JSON válido.
-- No uses comillas dobles dentro de los valores de texto.
-- No incluyas saltos de línea dentro de los campos.
 """
 
 col1, col2 = st.columns(2)
@@ -104,15 +102,19 @@ if uploaded_files and api_key:
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                selected_model = "models/gemini-3.5-flash"
+                # Selección de modelo válido y configuración JSON
+                selected_model = "gemini-1.5-flash"
 
                 model = genai.GenerativeModel(
                     model_name=selected_model,
                     system_instruction=SYSTEM_INSTRUCTIONS,
-                    generation_config={"response_mime_type": "application/json"}
+                    generation_config={
+                        "temperature": 0.0,
+                        "response_mime_type": "application/json"
+                    }
                 )
 
-                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
                 response = model.generate_content(prompt)
 
                 st.session_state["result_json"] = response.text
@@ -129,7 +131,11 @@ if "result_json" in st.session_state:
     
     try:
         raw_json = st.session_state["result_json"]
-        cleaned_json = re.sub(r'[\r\n]+', ' ', raw_json)
+        
+        # Limpieza segura de marcas de bloque JSON Markdown
+        cleaned_json = re.sub(r"^```json\s*", "", raw_json, flags=re.MULTILINE)
+        cleaned_json = re.sub(r"^```\s*", "", cleaned_json, flags=re.MULTILINE).strip()
+        
         data = json.loads(cleaned_json)
         
         if isinstance(data, dict):
