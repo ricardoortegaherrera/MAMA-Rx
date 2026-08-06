@@ -89,61 +89,97 @@ with col2:
     st.markdown("### 2. Informes PDF de la paciente")
     uploaded_files = st.file_uploader("Sube los PDFs (RX, INCIS, ESCIS):", type=["pdf"], accept_multiple_files=True)
 
+def get_available_models(clean_key):
+    """Consulta la lista de modelos habilitados para la API key."""
+    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
+    try:
+        res = requests.get(list_url)
+        if res.status_code == 200:
+            models_data = res.json().get("models", [])
+            valid_models = []
+            for m in models_data:
+                methods = m.get("supportedGenerationMethods", [])
+                if "generateContent" in methods:
+                    # m['name'] viene como "models/gemini-1.5-flash"
+                    name = m.get("name", "").replace("models/", "")
+                    if "gemini" in name:
+                        valid_models.append(name)
+            return valid_models
+    except Exception:
+        pass
+    # Lista fallback genérica
+    return ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash"]
+
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
-        with st.spinner("Analizando documentos directamente con la API de Gemini..."):
+        with st.spinner("Buscando modelos disponibles y analizando documentos..."):
             try:
                 clean_api_key = api_key.strip()
 
+                # 1. Leer los archivos PDF
                 texts = {}
                 for f in uploaded_files:
                     reader = PdfReader(f)
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
-                # Modelos compatibles a consultar vía API REST directo (v1)
-                model_candidates = ["gemini-1.5-flash", "gemini-1.5-pro"]
+                # 2. Descubrir modelos activos automáticamente
+                model_candidates = get_available_models(clean_api_key)
                 
+                if not model_candidates:
+                    st.error("⚠️ No se encontraron modelos disponibles para tu clave de API. Verifica que la API Key sea válida en Google AI Studio.")
+                    st.stop()
+
                 extracted_text = None
                 successful_model = None
-                last_error = ""
+                errors = []
 
+                # 3. Probar con los modelos obtenidos
                 for model_name in model_candidates:
-                    url = f"https://generativelanguage.googleapis.com/v1/models/{model_name}:generateContent?key={clean_api_key}"
-                    headers = {"Content-Type": "application/json"}
-                    payload = {
-                        "contents": [
-                            {
-                                "parts": [{"text": prompt_text}]
+                    # Se prueba primero con la endpoint v1beta y si falla v1
+                    for api_ver in ["v1beta", "v1"]:
+                        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model_name}:generateContent?key={clean_api_key}"
+                        headers = {"Content-Type": "application/json"}
+                        payload = {
+                            "contents": [
+                                {
+                                    "parts": [{"text": prompt_text}]
+                                }
+                            ],
+                            "systemInstruction": {
+                                "parts": [{"text": SYSTEM_INSTRUCTIONS}]
+                            },
+                            "generationConfig": {
+                                "temperature": 0.0,
+                                "responseMimeType": "application/json"
                             }
-                        ],
-                        "systemInstruction": {
-                            "parts": [{"text": SYSTEM_INSTRUCTIONS}]
-                        },
-                        "generationConfig": {
-                            "temperature": 0.0,
-                            "responseMimeType": "application/json"
                         }
-                    }
 
-                    response = requests.post(url, headers=headers, json=payload)
-                    res_json = response.json()
+                        response = requests.post(url, headers=headers, json=payload)
+                        res_json = response.json()
 
-                    if response.status_code == 200 and "candidates" in res_json:
-                        extracted_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                        successful_model = model_name
+                        if response.status_code == 200 and "candidates" in res_json:
+                            try:
+                                extracted_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                                successful_model = f"{model_name} ({api_ver})"
+                                break
+                            except (KeyError, IndexError):
+                                continue
+                        else:
+                            err_msg = res_json.get("error", {}).get("message", response.text)
+                            errors.append(f"{model_name} [{api_ver}]: {err_msg}")
+                    
+                    if extracted_text:
                         break
-                    else:
-                        last_error = res_json.get("error", {}).get("message", response.text)
 
                 if not extracted_text:
-                    st.error(f"⚠️ Error al conectar con la API de Gemini: {last_error}")
+                    st.error(f"⚠️ No se pudo conectar con ningún modelo. Detalle de errores:\n\n" + "\n".join(errors[:3]))
                     st.stop()
 
                 st.session_state["result_json"] = extracted_text
-                st.success(f"✅ ¡Extracción completada con éxito usando **{successful_model}**! Revisa los datos abajo.")
+                st.success(f"✅ ¡Extracción completada con éxito usando **{successful_model}**!")
 
             except Exception as e:
                 st.error(f"⚠️ Error general al procesar: {str(e)}")
@@ -211,9 +247,6 @@ if "result_json" in st.session_state:
                 file_name=f"caso_extraido_{selected_year}.csv",
                 mime="text/csv"
             )
-
-    except Exception as e:
-        st.error(f"Error al procesar los datos: {e}")
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
