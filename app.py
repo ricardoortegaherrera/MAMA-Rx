@@ -47,6 +47,7 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - FECHA_BIOPSIA: Fecha de la realización/firma de la prueba en el informe radiológico (DD/MM/AAAA). Ignorar fechas de laboratorio de anatomía patológica.
 - SCREENING: Marcar OBLIGATORIAMENTE "Sí" o "No". Si procede de screening, PDPCM, cribado o programa de detección precoz, pon siempre "Sí".
 - MAMOGRAFIAS_PREVIAS_SCREENING: Dejar SIEMPRE VACÍO ("").
+- ALGUNA_MAMOGRAFIA_PREVIA_SCREENING: Dejar SIEMPRE VACÍO ("").
 - CLINICA: Opciones del desplegable o "Asintomática" si no consta síntoma.
 - ANTECEDENTES_MISMA_MAMA: "Sí" o "No" (en duda poner "No").
 - ANTECEDENTES_CONTRALATERAL: "Sí" o "No" (en duda poner "No").
@@ -178,11 +179,16 @@ if "result_json" in st.session_state:
         else:
             new_df = pd.DataFrame(data)
         
-        # Garantizar que el campo MAMOGRAFIAS_PREVIAS_SCREENING esté presente y vacío
+        # Garantizar que las columnas G y H estén presentes y vacías
         if "MAMOGRAFIAS_PREVIAS_SCREENING" not in new_df.columns:
             new_df.insert(6, "MAMOGRAFIAS_PREVIAS_SCREENING", "")
         else:
             new_df["MAMOGRAFIAS_PREVIAS_SCREENING"] = ""
+
+        if "ALGUNA_MAMOGRAFIA_PREVIA_SCREENING" not in new_df.columns:
+            new_df.insert(7, "ALGUNA_MAMOGRAFIA_PREVIA_SCREENING", "")
+        else:
+            new_df["ALGUNA_MAMOGRAFIA_PREVIA_SCREENING"] = ""
             
         edited_df = st.data_editor(new_df, num_rows="dynamic", use_container_width=True)
         
@@ -206,8 +212,8 @@ if "result_json" in st.session_state:
             for _, row in edited_df.iterrows():
                 row_values = row.tolist()
                 for col_idx, val in enumerate(row_values, start=1):
-                    # Si la celda es la columna 7 (Columna G), forzar vacío
-                    if col_idx == 7:
+                    # Forzar vacías las columnas 7 (G) y 8 (H)
+                    if col_idx in [7, 8]:
                         ws.cell(row=target_row, column=col_idx, value=None)
                     else:
                         ws.cell(row=target_row, column=col_idx, value=val)
