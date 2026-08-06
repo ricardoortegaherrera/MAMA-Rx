@@ -46,6 +46,7 @@ De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - EDAD: Edad reflejada en el informe radiológico.
 - FECHA_BIOPSIA: Fecha de la realización/firma de la prueba en el informe radiológico (DD/MM/AAAA). Ignorar fechas de laboratorio de anatomía patológica.
 - SCREENING: Marcar OBLIGATORIAMENTE "Sí" o "No". Si procede de screening, PDPCM, cribado o programa de detección precoz, pon siempre "Sí".
+- MAMOGRAFIAS_PREVIAS_SCREENING: Dejar SIEMPRE VACÍO ("").
 - CLINICA: Opciones del desplegable o "Asintomática" si no consta síntoma.
 - ANTECEDENTES_MISMA_MAMA: "Sí" o "No" (en duda poner "No").
 - ANTECEDENTES_CONTRALATERAL: "Sí" o "No" (en duda poner "No").
@@ -67,12 +68,6 @@ De los informes finalizados en INCIS / Incis / incis (Informe Anatomopatológico
 - SUBCLASIFICACION_MOLECULAR: Marcadores moleculares (Luminal A, Luminal B, HER2, Triple Negativo, etc.).
 - ESTADIO_ECOGRAFICO_AXILAR: N0, N1 o N2.
 - RESULTADO_BIOPSIA_AXILAR: "Sí" o "No" / "No realizada". Si la axila fue negativa en ecografía o no fue biopsiada, poner "No".
-
-De los informes finalizados en ESCIS / Escis / escis (Hoja Quirúrgica / Escisional):
-- GANGLIO_CENTINELA: "Sí" o "No".
-- RESULTADO_GANGLIO_CENTINELA: "Sí" si es positivo, "MICROMETÁSTASIS" si consta como tal. Células aisladas = Negativo.
-- VACIAMIENTO_AXILAR: "Sí" o "No".
-- RESULTADO_VACIAMIENTO: Si VACIAMIENTO_AXILAR es "No", la columna debe quedar VACÍA (null/sin texto).
 
 REGLAS ESTRUCTURALES DE SALIDA:
 - Devuelve ÚNICAMENTE un objeto JSON válido.
@@ -107,7 +102,7 @@ def get_available_models(clean_key):
     return ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash"]
 
 def get_first_empty_row(ws, check_col=2, start_row=2):
-    """Encuentra la primera fila realmente vacía en la columna dada (Columna B / NUHSA)."""
+    """Encuentra la primera fila verdaderamente vacía basándose en la Columna B (NUHSA)."""
     r = start_row
     while True:
         val = ws.cell(r, check_col).value
@@ -117,27 +112,21 @@ def get_first_empty_row(ws, check_col=2, start_row=2):
 
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
-        with st.spinner("Buscando modelos disponibles y analizando documentos..."):
+        with st.spinner("Analizando documentos..."):
             try:
                 clean_api_key = api_key.strip()
-
                 texts = {}
                 for f in uploaded_files:
                     reader = PdfReader(f)
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones del sistema:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
                 model_candidates = get_available_models(clean_api_key)
                 
-                if not model_candidates:
-                    st.error("⚠️ No se encontraron modelos disponibles para tu clave de API.")
-                    st.stop()
-
                 extracted_text = None
                 successful_model = None
-                errors = []
 
                 for model_name in model_candidates:
                     for api_ver in ["v1beta", "v1"]:
@@ -159,19 +148,15 @@ if uploaded_files and api_key:
                                 break
                             except (KeyError, IndexError):
                                 continue
-                        else:
-                            err_msg = res_json.get("error", {}).get("message", response.text)
-                            errors.append(f"{model_name} [{api_ver}]: {err_msg}")
-                    
                     if extracted_text:
                         break
 
                 if not extracted_text:
-                    st.error(f"⚠️ No se pudo conectar con ningún modelo.")
+                    st.error("⚠️ No se pudo conectar con ningún modelo.")
                     st.stop()
 
                 st.session_state["result_json"] = extracted_text
-                st.success(f"✅ ¡Extracción completada con éxito usando **{successful_model}**!")
+                st.success(f"✅ ¡Extracción completada con éxito!")
 
             except Exception as e:
                 st.error(f"⚠️ Error general al procesar: {str(e)}")
@@ -192,6 +177,12 @@ if "result_json" in st.session_state:
             new_df = pd.DataFrame([data])
         else:
             new_df = pd.DataFrame(data)
+        
+        # Garantizar que el campo MAMOGRAFIAS_PREVIAS_SCREENING esté presente y vacío
+        if "MAMOGRAFIAS_PREVIAS_SCREENING" not in new_df.columns:
+            new_df.insert(6, "MAMOGRAFIAS_PREVIAS_SCREENING", "")
+        else:
+            new_df["MAMOGRAFIAS_PREVIAS_SCREENING"] = ""
             
         edited_df = st.data_editor(new_df, num_rows="dynamic", use_container_width=True)
         
@@ -205,21 +196,22 @@ if "result_json" in st.session_state:
             
             if target_sheet_name not in wb.sheetnames:
                 ws = wb.create_sheet(title=target_sheet_name)
-                ws.append(list(edited_df.columns))
             else:
                 ws = wb[target_sheet_name]
             
-            # --- AQUÍ ESTÁ EL CAMBIO CLAVE ---
-            # Buscamos la fila libre inmediatamente posterior a la lista de pacientes (comprobando la columna NUHSA)
+            # Buscamos la fila vacía en la Columna B (NUHSA)
             target_row = get_first_empty_row(ws, check_col=2, start_row=2)
             
-            # Insertamos fila por fila en la posición contigua exacta
+            # Escribir fila a fila directamente en las celdas contiguas
             for _, row in edited_df.iterrows():
                 row_values = row.tolist()
                 for col_idx, val in enumerate(row_values, start=1):
-                    ws.cell(row=target_row, column=col_idx, value=val)
+                    # Si la celda es la columna 7 (Columna G), forzar vacío
+                    if col_idx == 7:
+                        ws.cell(row=target_row, column=col_idx, value=None)
+                    else:
+                        ws.cell(row=target_row, column=col_idx, value=val)
                 target_row += 1
-            # ---------------------------------
 
             output_buffer = io.BytesIO()
             wb.save(output_buffer)
