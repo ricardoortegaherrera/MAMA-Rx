@@ -8,7 +8,6 @@ import streamlit as st
 from pypdf import PdfReader
 import openpyxl
 
-# Configuración de página Streamlit
 st.set_page_config(
     page_title="Extractor Biopsias Mama - Unidad Radiología",
     page_icon="🩺",
@@ -18,10 +17,9 @@ st.set_page_config(
 st.title("🩺 Gestor de Biopsias de Mama - Extracción y Registro")
 st.markdown("""
 Esta aplicación procesa los informes PDF (`...RX`, `...INCIS`, `...ESCIS`), extrae la información estructurada
-según las reglas médicas de la unidad y anexa los datos directamente a tu libro de Excel original.
+según las reglas médicas de la unidad y anexa los datos en el orden exacto de columnas acordado.
 """)
 
-# Obtener clave de secrets si existe como valor por defecto
 default_key = ""
 try:
     if "GEMINI_API_KEY" in st.secrets:
@@ -29,7 +27,6 @@ try:
 except Exception:
     pass
 
-# Barra lateral de configuración
 st.sidebar.header("⚙️ Configuración")
 api_key = st.sidebar.text_input("Ingresa tu clave de API Gemini:", value=default_key, type="password")
 selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "2025", "2024"])
@@ -37,38 +34,40 @@ selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "
 SYSTEM_INSTRUCTIONS = """
 Eres un asistente médico especializado en radiología y senología mamaria. Tu función es extraer exactamente los campos indicados a partir de los informes PDF proporcionados.
 
-NORMAS Y REGLAS DE EXTRACCIÓN OBLIGATORIAS:
+DEVUELVE LOS DATOS EN UN JSON CON LAS SIGUIENTES LLAVES EXACTAS:
 
-De los informes finalizados en RX / Rx / rx (Informe Radiológico):
 - NH: Número de historia clínica del informe.
 - NUHSA: Número de identificación andaluza de la paciente.
 - NOMBRE: Nombre y apellidos en MAYÚSCULAS, sin comas.
-- EDAD: Edad reflejada en el informe radiológico.
-- FECHA_BIOPSIA: Fecha de la realización/firma de la prueba en el informe radiológico (DD/MM/AAAA). Ignorar fechas de laboratorio de anatomía patológica.
-- SCREENING: Marcar OBLIGATORIAMENTE "Sí" o "No". Si procede de screening, PDPCM, cribado o programa de detección precoz, pon siempre "Sí".
-- MAMOGRAFIAS_PREVIAS_SCREENING: Dejar SIEMPRE VACÍO ("").
-- ALGUNA_MAMOGRAFIA_PREVIA_SCREENING: Dejar SIEMPRE VACÍO ("").
-- CLINICA: Opciones del desplegable o "Asintomática" si no consta síntoma.
-- ANTECEDENTES_MISMA_MAMA: "Sí" o "No" (en duda poner "No").
-- ANTECEDENTES_CONTRALATERAL: "Sí" o "No" (en duda poner "No").
-- ASPECTO_MAMOGRAFICO: Descriptor mamográfico. Si solo hay eco, indicar "No mamografía".
-- MAMOGRAFIA_CON_CONTRASTE: "Sí" o "No" (MCE / MC).
-- BAV: "Sí" o "No" (Biopsia asistida por vacío / estereotaxia).
-- TAMAÑO_RX: Tamaño máximo de la lesión expresado OBLIGATORIAMENTE EN CENTÍMETROS (cm). Si en el informe viene en milímetros (mm), conviértelo a centímetros (ejemplo: 18 mm -> 1.8). Si no se describe en MX pero sí en Eco, usar Eco.
+- EDAD: Edad reflejada en el informe.
+- FECHA_BIOPSIA: Fecha de realización/firma de la prueba radiológica (DD/MM/AAAA).
+- SCREENING: Marcar "Sí" o "No" (PDPCM / cribado = "Sí").
+- MAMOGRAFIAS_PREVIAS_1: Dejar VACÍO ("").
+- MAMOGRAFIAS_PREVIAS_2: Dejar VACÍO ("").
+- CLINICA: "Asintomática" o síntoma principal.
+- ANTECEDENTES_MISMA_MAMA: "Sí" o "No".
+- ANTECEDENTES_CONTRALATERAL: "Sí" o "No".
+- ASPECTO_MAMOGRAFICO: Descriptor mamográfico (ej. "Lesión espiculada", "No mamografía").
+- MAMOGRAFIA_CON_CONTRASTE: "Sí" o "No".
+- BAV: "Sí" o "No".
+- TAMAÑO_RX: Tamaño en CENTÍMETROS (cm). Ej: 18 mm -> 1.8 cm.
 - MULTICENTRICO: "Sí" o "No".
 - MULTIFOCAL: "Sí" o "No".
-- BIRADS: Formato OBLIGATORIO escribiendo siempre 'BIRADS' seguido de un espacio y el número correspondiente (ejemplo: 'BIRADS 5').
-- RM: "Sí" o "No" (indicar si aporta más datos o "No realizada" si no consta).
+- BIRADS: Formato 'BIRADS X' (ej. 'BIRADS 5').
+- RESULTADO_AP_MAMA: Resultado histológico con Grado (ej. 'Carcinoma ductal infiltrante G2').
+- SUBCLASIFICACION_MOLECULAR: Marcadores moleculares (ej. 'Luminal A', 'Luminal B', 'HER2+', 'Triple Negativo').
+- RM: "Sí", "No" o "No realizada".
 - ECO_AXILA_ACTO_UNICO: "Sí" o "No".
-- SOSPECHA_ECO_AXILAR: "Sí" o "No". Si no se aprecian adenopatías sospechosas en ecografía, marcar "No".
+- ESTADIO_ECOGRAFICO_AXILAR: N0, N1, N2.
+- SOSPECHA_ECO_AXILAR: "Sí" o "No".
 - PAAF_AXILA: "Sí" o "No".
 - BAG_AXILA: "Sí" o "No".
-
-De los informes finalizados en INCIS / Incis / incis (Informe Anatomopatológico):
-- RESULTADO_AP_MAMA: Resultado AP de la lesión mamaria. Si se trata de un carcinoma ductal infiltrante, especificar el GRADO HISTOLÓGICO (ejemplo: 'Carcinoma ductal infiltrante G2').
-- SUBCLASIFICACION_MOLECULAR: Marcadores moleculares (Luminal A, Luminal B, HER2, Triple Negativo, etc.).
-- ESTADIO_ECOGRAFICO_AXILAR: N0, N1 o N2.
-- RESULTADO_BIOPSIA_AXILAR: "Sí" o "No" / "No realizada". Si la axila fue negativa en ecografía o no fue biopsiada, poner "No".
+- RESULTADO_BIOPSIA_AXILAR: "Sí" o "No".
+- GANGLIO_CENTINELA: "Sí" o "No".
+- RESULTADO_GANGLIO_CENTINELA: "Sí", "No", "MICROMETÁSTASIS".
+- VACIAMIENTO_AXILAR: "Sí" o "No".
+- RESULTADO_VACIAMIENTO: "Sí", "No", o VACÍO ("") si VACIAMIENTO_AXILAR es "No".
+- COMENTARIO: Dejar VACÍO ("") o nota relevante.
 
 REGLAS ESTRUCTURALES DE SALIDA:
 - Devuelve ÚNICAMENTE un objeto JSON válido.
@@ -103,7 +102,7 @@ def get_available_models(clean_key):
     return ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash"]
 
 def get_first_empty_row(ws, check_col=2, start_row=2):
-    """Encuentra la primera fila verdaderamente vacía basándose en la Columna B (NUHSA)."""
+    """Búsqueda estricta de la primera fila contigua vacía evaluando la Columna B (NUHSA)."""
     r = start_row
     while True:
         val = ws.cell(r, check_col).value
@@ -113,7 +112,7 @@ def get_first_empty_row(ws, check_col=2, start_row=2):
 
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
-        with st.spinner("Analizando documentos..."):
+        with st.spinner("Analizando documentos e ingresando según el nuevo mapa de columnas..."):
             try:
                 clean_api_key = api_key.strip()
                 texts = {}
@@ -125,9 +124,7 @@ if uploaded_files and api_key:
                 prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
                 model_candidates = get_available_models(clean_api_key)
-                
                 extracted_text = None
-                successful_model = None
 
                 for model_name in model_candidates:
                     for api_ver in ["v1beta", "v1"]:
@@ -145,7 +142,6 @@ if uploaded_files and api_key:
                         if response.status_code == 200 and "candidates" in res_json:
                             try:
                                 extracted_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                                successful_model = f"{model_name} ({api_ver})"
                                 break
                             except (KeyError, IndexError):
                                 continue
@@ -153,16 +149,15 @@ if uploaded_files and api_key:
                         break
 
                 if not extracted_text:
-                    st.error("⚠️ No se pudo conectar con ningún modelo.")
+                    st.error("⚠️ No se pudo conectar con los modelos de IA.")
                     st.stop()
 
                 st.session_state["result_json"] = extracted_text
-                st.success(f"✅ ¡Extracción completada con éxito!")
+                st.success("✅ ¡Datos extraídos correctamente!")
 
             except Exception as e:
-                st.error(f"⚠️ Error general al procesar: {str(e)}")
+                st.error(f"⚠️ Error al procesar: {str(e)}")
 
-# Sección de revisión y exportación
 if "result_json" in st.session_state:
     st.markdown("---")
     st.subheader("📋 Previsualización y Edición del Caso Extraído")
@@ -179,17 +174,31 @@ if "result_json" in st.session_state:
         else:
             new_df = pd.DataFrame(data)
         
-        # Garantizar que las columnas G y H estén presentes y vacías
-        if "MAMOGRAFIAS_PREVIAS_SCREENING" not in new_df.columns:
-            new_df.insert(6, "MAMOGRAFIAS_PREVIAS_SCREENING", "")
-        else:
-            new_df["MAMOGRAFIAS_PREVIAS_SCREENING"] = ""
+        # Orden exacto de columnas acorde a las especificaciones solicitadas (A -> AF)
+        target_column_order = [
+            "NH", "NUHSA", "NOMBRE", "EDAD", "FECHA_BIOPSIA", "SCREENING",
+            "MAMOGRAFIAS_PREVIAS_1", "MAMOGRAFIAS_PREVIAS_2", "CLINICA",
+            "ANTECEDENTES_MISMA_MAMA", "ANTECEDENTES_CONTRALATERAL", "ASPECTO_MAMOGRAFICO",
+            "MAMOGRAFIA_CON_CONTRASTE", "BAV", "TAMAÑO_RX", "MULTICENTRICO",
+            "MULTIFOCAL", "BIRADS", "RESULTADO_AP_MAMA", "SUBCLASIFICACION_MOLECULAR",
+            "RM", "ECO_AXILA_ACTO_UNICO", "ESTADIO_ECOGRAFICO_AXILAR", "SOSPECHA_ECO_AXILAR",
+            "PAAF_AXILA", "BAG_AXILA", "RESULTADO_BIOPSIA_AXILAR", "GANGLIO_CENTINELA",
+            "RESULTADO_GANGLIO_CENTINELA", "VACIAMIENTO_AXILAR", "RESULTADO_VACIAMIENTO",
+            "COMENTARIO"
+        ]
 
-        if "ALGUNA_MAMOGRAFIA_PREVIA_SCREENING" not in new_df.columns:
-            new_df.insert(7, "ALGUNA_MAMOGRAFIA_PREVIA_SCREENING", "")
-        else:
-            new_df["ALGUNA_MAMOGRAFIA_PREVIA_SCREENING"] = ""
-            
+        # Garantizar que todas las columnas existan en el dataframe
+        for col in target_column_order:
+            if col not in new_df.columns:
+                new_df[col] = ""
+
+        # Forzar vacías G (pos 7) y H (pos 8)
+        new_df["MAMOGRAFIAS_PREVIAS_1"] = ""
+        new_df["MAMOGRAFIAS_PREVIAS_2"] = ""
+
+        # Reordenar dataframe
+        new_df = new_df[target_column_order]
+
         edited_df = st.data_editor(new_df, num_rows="dynamic", use_container_width=True)
         
         st.markdown("---")
@@ -199,24 +208,19 @@ if "result_json" in st.session_state:
             wb = openpyxl.load_workbook(io.BytesIO(excel_bytes))
             
             target_sheet_name = str(selected_year).strip()
+            ws = wb[target_sheet_name] if target_sheet_name in wb.sheetnames else wb.create_sheet(title=target_sheet_name)
             
-            if target_sheet_name not in wb.sheetnames:
-                ws = wb.create_sheet(title=target_sheet_name)
-            else:
-                ws = wb[target_sheet_name]
-            
-            # Buscamos la fila vacía en la Columna B (NUHSA)
+            # Fila vacía consecutiva basada en la columna NUHSA
             target_row = get_first_empty_row(ws, check_col=2, start_row=2)
             
-            # Escribir fila a fila directamente en las celdas contiguas
             for _, row in edited_df.iterrows():
                 row_values = row.tolist()
                 for col_idx, val in enumerate(row_values, start=1):
-                    # Forzar vacías las columnas 7 (G) y 8 (H)
+                    # Forzar celda vacía si son las columnas G (7) o H (8)
                     if col_idx in [7, 8]:
                         ws.cell(row=target_row, column=col_idx, value=None)
                     else:
-                        ws.cell(row=target_row, column=col_idx, value=val)
+                        ws.cell(row=target_row, column=col_idx, value=val if str(val).strip() != "" else None)
                 target_row += 1
 
             output_buffer = io.BytesIO()
