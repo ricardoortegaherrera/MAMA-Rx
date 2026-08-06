@@ -17,7 +17,7 @@ st.set_page_config(
 st.title("🩺 Gestor de Biopsias de Mama - Extracción y Registro")
 st.markdown("""
 Esta aplicación procesa los informes PDF (`...RX`, `...INCIS`, `...ESCIS`), extrae la información estructurada
-según las reglas médicas de la unidad y anexa los datos en el orden exacto de columnas acordado.
+según las reglas médicas de la unidad y anexa o **actualiza** los datos en el Excel sin duplicar pacientes.
 """)
 
 default_key = ""
@@ -33,6 +33,8 @@ selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "
 
 SYSTEM_INSTRUCTIONS = """
 Eres un asistente médico especializado en radiología y senología mamaria. Tu función es extraer exactamente los campos indicados a partir de los informes PDF proporcionados.
+
+SI NO HAY INFORME QUIRÚRGICO (ESCIS), DEJA LOS CAMPOS DE GANGLIO CENTINELA Y VACIAMIENTO AXILAR TOTALMENTE VACÍOS ("").
 
 DEVUELVE LOS DATOS EN UN JSON CON LAS SIGUIENTES LLAVES EXACTAS:
 
@@ -63,10 +65,10 @@ DEVUELVE LOS DATOS EN UN JSON CON LAS SIGUIENTES LLAVES EXACTAS:
 - PAAF_AXILA: "Sí" o "No".
 - BAG_AXILA: "Sí" o "No".
 - RESULTADO_BIOPSIA_AXILAR: "Sí" o "No".
-- GANGLIO_CENTINELA: "Sí" o "No".
-- RESULTADO_GANGLIO_CENTINELA: "Sí", "No", "MICROMETÁSTASIS".
-- VACIAMIENTO_AXILAR: "Sí" o "No".
-- RESULTADO_VACIAMIENTO: "Sí", "No", o VACÍO ("") si VACIAMIENTO_AXILAR es "No".
+- GANGLIO_CENTINELA: "Sí" o "No" (O "" si no hay ESCIS).
+- RESULTADO_GANGLIO_CENTINELA: "Sí", "No", "MICROMETÁSTASIS" (O "" si no hay ESCIS).
+- VACIAMIENTO_AXILAR: "Sí" o "No" (O "" si no hay ESCIS).
+- RESULTADO_VACIAMIENTO: "Sí", "No", o VACÍO ("") si VACIAMIENTO_AXILAR es "No" o si no hay ESCIS.
 - COMENTARIO: Dejar VACÍO ("") o nota relevante.
 
 REGLAS ESTRUCTURALES DE SALIDA:
@@ -102,7 +104,7 @@ def get_available_models(clean_key):
     return ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash"]
 
 def get_first_empty_row(ws, check_col=2, start_row=2):
-    """Búsqueda estricta de la primera fila contigua vacía evaluando la Columna B (NUHSA)."""
+    """Encuentra la primera fila vacía continua basándose en la columna B (NUHSA)."""
     r = start_row
     while True:
         val = ws.cell(r, check_col).value
@@ -110,9 +112,22 @@ def get_first_empty_row(ws, check_col=2, start_row=2):
             return r
         r += 1
 
+def find_existing_patient_row(ws, nuhsa_val, nh_val, max_search_row=150):
+    """Busca si el paciente ya existe en la hoja comparando NUHSA o NH."""
+    clean_nuhsa = str(nuhsa_val).strip() if nuhsa_val else ""
+    clean_nh = str(nh_val).strip() if nh_val else ""
+
+    for r in range(2, max_search_row):
+        excel_nh = str(ws.cell(r, 1).value or "").strip()
+        excel_nuhsa = str(ws.cell(r, 2).value or "").strip()
+
+        if (clean_nuhsa and clean_nuhsa == excel_nuhsa) or (clean_nh and clean_nh == excel_nh):
+            return r
+    return None
+
 if uploaded_files and api_key:
     if st.button("🚀 Procesar Documentos y Extraer Datos"):
-        with st.spinner("Analizando documentos e ingresando según el nuevo mapa de columnas..."):
+        with st.spinner("Analizando informes médicos..."):
             try:
                 clean_api_key = api_key.strip()
                 texts = {}
@@ -174,7 +189,6 @@ if "result_json" in st.session_state:
         else:
             new_df = pd.DataFrame(data)
         
-        # Orden exacto de columnas acorde a las especificaciones solicitadas (A -> AF)
         target_column_order = [
             "NH", "NUHSA", "NOMBRE", "EDAD", "FECHA_BIOPSIA", "SCREENING",
             "MAMOGRAFIAS_PREVIAS_1", "MAMOGRAFIAS_PREVIAS_2", "CLINICA",
@@ -187,16 +201,13 @@ if "result_json" in st.session_state:
             "COMENTARIO"
         ]
 
-        # Garantizar que todas las columnas existan en el dataframe
         for col in target_column_order:
             if col not in new_df.columns:
                 new_df[col] = ""
 
-        # Forzar vacías G (pos 7) y H (pos 8)
         new_df["MAMOGRAFIAS_PREVIAS_1"] = ""
         new_df["MAMOGRAFIAS_PREVIAS_2"] = ""
 
-        # Reordenar dataframe
         new_df = new_df[target_column_order]
 
         edited_df = st.data_editor(new_df, num_rows="dynamic", use_container_width=True)
@@ -210,25 +221,45 @@ if "result_json" in st.session_state:
             target_sheet_name = str(selected_year).strip()
             ws = wb[target_sheet_name] if target_sheet_name in wb.sheetnames else wb.create_sheet(title=target_sheet_name)
             
-            # Fila vacía consecutiva basada en la columna NUHSA
-            target_row = get_first_empty_row(ws, check_col=2, start_row=2)
-            
+            updated_count = 0
+            created_count = 0
+
             for _, row in edited_df.iterrows():
+                nh_val = row.get("NH", "")
+                nuhsa_val = row.get("NUHSA", "")
+
+                # Comprobar si la paciente ya está registrada
+                existing_row = find_existing_patient_row(ws, nuhsa_val, nh_val)
+
+                if existing_row:
+                    target_row = existing_row
+                    updated_count += 1
+                else:
+                    target_row = get_first_empty_row(ws, check_col=2, start_row=2)
+                    created_count += 1
+
                 row_values = row.tolist()
                 for col_idx, val in enumerate(row_values, start=1):
-                    # Forzar celda vacía si son las columnas G (7) o H (8)
+                    # Forzar vacías G (7) y H (8)
                     if col_idx in [7, 8]:
                         ws.cell(row=target_row, column=col_idx, value=None)
                     else:
-                        ws.cell(row=target_row, column=col_idx, value=val if str(val).strip() != "" else None)
-                target_row += 1
+                        clean_val = str(val).strip() if val is not None else ""
+                        # Solo sobreescribir si trae un valor con contenido (o si es registro nuevo)
+                        if clean_val != "" or not existing_row:
+                            ws.cell(row=target_row, column=col_idx, value=clean_val if clean_val != "" else None)
 
             output_buffer = io.BytesIO()
             wb.save(output_buffer)
             final_excel = output_buffer.getvalue()
 
+            if updated_count > 0:
+                st.info(f"ℹ️ Se actualizó y completó la información de {updated_count} paciente(s) previamente registrada(s).")
+            if created_count > 0:
+                st.success(f"✅ Se creó el registro de {created_count} paciente(s) nueva(s).")
+
             st.download_button(
-                label=f"📥 Confirmar Visto Bueno y Descargar Excel Completo Actualizado ({selected_year})",
+                label=f"📥 Confirmar y Descargar Excel Actualizado ({selected_year})",
                 data=final_excel,
                 file_name=f"Registro_Biopsias_Actualizado.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -241,6 +272,9 @@ if "result_json" in st.session_state:
                 file_name=f"caso_extraido_{selected_year}.csv",
                 mime="text/csv"
             )
+
+    except Exception as e:
+        st.error(f"Error al procesar los datos: {e}")
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
