@@ -17,7 +17,7 @@ st.set_page_config(
 st.title("🩺 Gestor de Biopsias de Mama - Extracción y Registro")
 st.markdown("""
 Esta aplicación procesa los informes PDF (`...RX`, `...INCIS`, `...ESCIS`), extrae la información estructurada
-según las reglas médicas de la unidad y anexa o **actualiza** los datos en el Excel sin duplicar pacientes.
+según las reglas médicas de la unidad y anexa o actualiza los datos en el Excel sin duplicar pacientes.
 """)
 
 default_key = ""
@@ -31,59 +31,60 @@ st.sidebar.header("⚙️ Configuración")
 api_key = st.sidebar.text_input("Ingresa tu clave de API Gemini:", value=default_key, type="password")
 selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "2025", "2024"])
 
+# Botón en la barra lateral para reiniciar la sesión si se desea
+if st.sidebar.button("🔄 Reiniciar / Nueva Paciente"):
+    if "result_json" in st.session_state:
+        del st.session_state["result_json"]
+    st.rerun()
+
 SYSTEM_INSTRUCTIONS = """
 Eres un asistente médico especializado en radiología y senología mamaria. Tu función es extraer exactamente los campos indicados a partir de los informes PDF proporcionados.
 
-SI NO HAY INFORME QUIRÚRGICO (ESCIS), DEJA LOS CAMPOS DE GANGLIO CENTINELA Y VACIAMIENTO AXILAR TOTALMENTE VACÍOS ("").
+DESPLEGABLES OBLIGATORIOS (Elegir STRICTLY una opción exacta de estas listas):
+
+1. CLINICA (Seleccionar la más adecuada):
+- "nódulo palpable"
+- "mastalgia"
+- "clínica de carcinoma inflamatorio"
+- "asintomática"
+- "retracción del pezón"
+- "adenopatía axilar aislada"
+- "diagnóstico ocasional por otro método de imagen"
+- "galactorragia"
+- "galactorrea"
+- "masa exofítica ulcerada"
+- "diagnóstico ocasional distinto a la clínica de sospecha o al motivo"
+- "carcinoma mamario oculto"
+
+2. ASPECTO_MAMOGRAFICO (Seleccionar la más adecuada):
+- "nódulo mal definido"
+- "nódulo bien definido"
+- "lesión espiculada"
+- "mamografía normal"
+- "no mamografía"
+- "sólo microcalcificaciones irregulares"
+- "densidad asimétrica focal asociada a masa y microcalcificaciones"
+
+REGLAS GENERALES:
+- Si procede de screening o cribado y no consta síntoma, la CLINICA debe ser "asintomática".
+- Si no hay informe quirúrgico (ESCIS), deja los campos de GANGLIO CENTINELA y VACIAMIENTO AXILAR TOTALMENTE VACÍOS ("").
+- MAMOGRAFIAS_PREVIAS_1 y MAMOGRAFIAS_PREVIAS_2 deben quedar SIEMPRE VACÍAS ("").
 
 DEVUELVE LOS DATOS EN UN JSON CON LAS SIGUIENTES LLAVES EXACTAS:
+- NH, NUHSA, NOMBRE, EDAD, FECHA_BIOPSIA, SCREENING, MAMOGRAFIAS_PREVIAS_1, MAMOGRAFIAS_PREVIAS_2, CLINICA, ANTECEDENTES_MISMA_MAMA, ANTECEDENTES_CONTRALATERAL, ASPECTO_MAMOGRAFICO, MAMOGRAFIA_CON_CONTRASTE, BAV, TAMAÑO_RX, MULTICENTRICO, MULTIFOCAL, BIRADS, RESULTADO_AP_MAMA, SUBCLASIFICACION_MOLECULAR, RM, ECO_AXILA_ACTO_UNICO, ESTADIO_ECOGRAFICO_AXILAR, SOSPECHA_ECO_AXILAR, PAAF_AXILA, BAG_AXILA, RESULTADO_BIOPSIA_AXILAR, GANGLIO_CENTINELA, RESULTADO_GANGLIO_CENTINELA, VACIAMIENTO_AXILAR, RESULTADO_VACIAMIENTO, COMENTARIO.
 
-- NH: Número de historia clínica del informe.
-- NUHSA: Número de identificación andaluza de la paciente.
-- NOMBRE: Nombre y apellidos en MAYÚSCULAS, sin comas.
-- EDAD: Edad reflejada en el informe.
-- FECHA_BIOPSIA: Fecha de realización/firma de la prueba radiológica (DD/MM/AAAA).
-- SCREENING: Marcar "Sí" o "No" (PDPCM / cribado = "Sí").
-- MAMOGRAFIAS_PREVIAS_1: Dejar VACÍO ("").
-- MAMOGRAFIAS_PREVIAS_2: Dejar VACÍO ("").
-- CLINICA: "Asintomática" o síntoma principal.
-- ANTECEDENTES_MISMA_MAMA: "Sí" o "No".
-- ANTECEDENTES_CONTRALATERAL: "Sí" o "No".
-- ASPECTO_MAMOGRAFICO: Descriptor mamográfico (ej. "Lesión espiculada", "No mamografía").
-- MAMOGRAFIA_CON_CONTRASTE: "Sí" o "No".
-- BAV: "Sí" o "No".
-- TAMAÑO_RX: Tamaño en CENTÍMETROS (cm). Ej: 18 mm -> 1.8 cm.
-- MULTICENTRICO: "Sí" o "No".
-- MULTIFOCAL: "Sí" o "No".
-- BIRADS: Formato 'BIRADS X' (ej. 'BIRADS 5').
-- RESULTADO_AP_MAMA: Resultado histológico con Grado (ej. 'Carcinoma ductal infiltrante G2').
-- SUBCLASIFICACION_MOLECULAR: Marcadores moleculares (ej. 'Luminal A', 'Luminal B', 'HER2+', 'Triple Negativo').
-- RM: "Sí", "No" o "No realizada".
-- ECO_AXILA_ACTO_UNICO: "Sí" o "No".
-- ESTADIO_ECOGRAFICO_AXILAR: N0, N1, N2.
-- SOSPECHA_ECO_AXILAR: "Sí" o "No".
-- PAAF_AXILA: "Sí" o "No".
-- BAG_AXILA: "Sí" o "No".
-- RESULTADO_BIOPSIA_AXILAR: "Sí" o "No".
-- GANGLIO_CENTINELA: "Sí" o "No" (O "" si no hay ESCIS).
-- RESULTADO_GANGLIO_CENTINELA: "Sí", "No", "MICROMETÁSTASIS" (O "" si no hay ESCIS).
-- VACIAMIENTO_AXILAR: "Sí" o "No" (O "" si no hay ESCIS).
-- RESULTADO_VACIAMIENTO: "Sí", "No", o VACÍO ("") si VACIAMIENTO_AXILAR es "No" o si no hay ESCIS.
-- COMENTARIO: Dejar VACÍO ("") o nota relevante.
-
-REGLAS ESTRUCTURALES DE SALIDA:
-- Devuelve ÚNICAMENTE un objeto JSON válido.
+Devuelve ÚNICAMENTE un objeto JSON válido.
 """
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("### 1. Archivo Excel Registro (Opcional)")
-    excel_file = st.file_uploader("Sube tu Excel máster existente (.xlsx):", type=["xlsx"])
+    excel_file = st.file_uploader("Sube tu Excel máster existente (.xlsx):", type=["xlsx"], key="excel_uploader")
 
 with col2:
     st.markdown("### 2. Informes PDF de la paciente")
-    uploaded_files = st.file_uploader("Sube los PDFs (RX, INCIS, ESCIS):", type=["pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Sube los PDFs de la paciente (RX, INCIS, ESCIS):", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
 
 def get_available_models(clean_key):
     list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
@@ -104,7 +105,6 @@ def get_available_models(clean_key):
     return ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash"]
 
 def get_first_empty_row(ws, check_col=2, start_row=2):
-    """Encuentra la primera fila vacía continua basándose en la columna B (NUHSA)."""
     r = start_row
     while True:
         val = ws.cell(r, check_col).value
@@ -113,7 +113,6 @@ def get_first_empty_row(ws, check_col=2, start_row=2):
         r += 1
 
 def find_existing_patient_row(ws, nuhsa_val, nh_val, max_search_row=150):
-    """Busca si el paciente ya existe en la hoja comparando NUHSA o NH."""
     clean_nuhsa = str(nuhsa_val).strip() if nuhsa_val else ""
     clean_nh = str(nh_val).strip() if nh_val else ""
 
@@ -228,7 +227,6 @@ if "result_json" in st.session_state:
                 nh_val = row.get("NH", "")
                 nuhsa_val = row.get("NUHSA", "")
 
-                # Comprobar si la paciente ya está registrada
                 existing_row = find_existing_patient_row(ws, nuhsa_val, nh_val)
 
                 if existing_row:
@@ -240,12 +238,10 @@ if "result_json" in st.session_state:
 
                 row_values = row.tolist()
                 for col_idx, val in enumerate(row_values, start=1):
-                    # Forzar vacías G (7) y H (8)
                     if col_idx in [7, 8]:
                         ws.cell(row=target_row, column=col_idx, value=None)
                     else:
                         clean_val = str(val).strip() if val is not None else ""
-                        # Solo sobreescribir si trae un valor con contenido (o si es registro nuevo)
                         if clean_val != "" or not existing_row:
                             ws.cell(row=target_row, column=col_idx, value=clean_val if clean_val != "" else None)
 
@@ -258,23 +254,33 @@ if "result_json" in st.session_state:
             if created_count > 0:
                 st.success(f"✅ Se creó el registro de {created_count} paciente(s) nueva(s).")
 
-            st.download_button(
-                label=f"📥 Confirmar y Descargar Excel Actualizado ({selected_year})",
-                data=final_excel,
-                file_name=f"Registro_Biopsias_Actualizado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            c_download, c_reset = st.columns([2, 1])
+            with c_download:
+                st.download_button(
+                    label=f"📥 Confirmar y Descargar Excel Actualizado ({selected_year})",
+                    data=final_excel,
+                    file_name=f"Registro_Biopsias_Actualizado.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            with c_reset:
+                if st.button("➕ ¿Quieres registrar otra paciente?"):
+                    del st.session_state["result_json"]
+                    st.rerun()
+
         else:
             csv = edited_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Confirmar Visto Bueno y Descargar Caso como CSV",
-                data=csv,
-                file_name=f"caso_extraido_{selected_year}.csv",
-                mime="text/csv"
-            )
-
-    except Exception as e:
-        st.error(f"Error al procesar los datos: {e}")
+            c_download, c_reset = st.columns([2, 1])
+            with c_download:
+                st.download_button(
+                    label="📥 Confirmar Visto Bueno y Descargar Caso como CSV",
+                    data=csv,
+                    file_name=f"caso_extraido_{selected_year}.csv",
+                    mime="text/csv"
+                )
+            with c_reset:
+                if st.button("➕ ¿Quieres registrar otra paciente?"):
+                    del st.session_state["result_json"]
+                    st.rerun()
 
     except Exception as e:
         st.error(f"Error al procesar los datos: {e}")
