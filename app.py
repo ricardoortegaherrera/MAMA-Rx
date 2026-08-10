@@ -31,7 +31,6 @@ st.sidebar.header("⚙️ Configuración")
 api_key = st.sidebar.text_input("Ingresa tu clave de API Gemini:", value=default_key, type="password")
 selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "2025", "2024"])
 
-# Botón en la barra lateral para reiniciar la sesión si se desea
 if st.sidebar.button("🔄 Reiniciar / Nueva Paciente"):
     if "result_json" in st.session_state:
         del st.session_state["result_json"]
@@ -40,9 +39,30 @@ if st.sidebar.button("🔄 Reiniciar / Nueva Paciente"):
 SYSTEM_INSTRUCTIONS = """
 Eres un asistente médico especializado en radiología y senología mamaria. Tu función es extraer exactamente los campos indicados a partir de los informes PDF proporcionados.
 
+REGLAS DE FORMATO Y UNIDADES (CRÍTICO):
+1. TAMAÑO_RX: Debe expresarse SIEMPRE en CENTÍMETROS (cm). Si el informe refleja milímetros (mm), divídelo entre 10 y añade "cm" (ej: 18 mm -> "1.8 cm", 15 mm -> "1.5 cm"). NUNCA pongas la medida en mm.
+
 DESPLEGABLES OBLIGATORIOS (Elegir STRICTLY una opción exacta de estas listas):
 
-1. CLINICA (Seleccionar la más adecuada):
+1. RESULTADO_AP_MAMA (Seleccionar la opción EXACTA más adecuada):
+- "carcinoma ductal infiltrante grado 1"
+- "carcinoma ductal infiltrante grado 2"
+- "carcinoma ductal infiltrante grado 3"
+- "carcinoma infiltrante no especial"
+- "carcinoma intraductal"
+- "carcinoma in situ"
+- "carcinoma mucinoso"
+- "carcinoma tubular"
+- "metástasis"
+- "carcinoma lobulillar infiltrante"
+- "carcinoma infiltrante con patrón sólido papilar"
+- "carcinoma papilar"
+- "carcinoma en general"
+- "lesión papilar"
+- "carcinoma microinvasor"
+- "otros"
+
+2. CLINICA (Seleccionar la más adecuada):
 - "nódulo palpable"
 - "mastalgia"
 - "clínica de carcinoma inflamatorio"
@@ -56,7 +76,7 @@ DESPLEGABLES OBLIGATORIOS (Elegir STRICTLY una opción exacta de estas listas):
 - "diagnóstico ocasional distinto a la clínica de sospecha o al motivo"
 - "carcinoma mamario oculto"
 
-2. ASPECTO_MAMOGRAFICO (Seleccionar la más adecuada):
+3. ASPECTO_MAMOGRAFICO (Seleccionar la más adecuada):
 - "nódulo mal definido"
 - "nódulo bien definido"
 - "lesión espiculada"
@@ -66,7 +86,7 @@ DESPLEGABLES OBLIGATORIOS (Elegir STRICTLY una opción exacta de estas listas):
 - "densidad asimétrica focal asociada a masa y microcalcificaciones"
 
 REGLAS GENERALES:
-- Si procede de screening o cribado y no consta síntoma, la CLINICA debe ser "asintomática".
+- Si el diagnóstico patológico indica "grado 2", debes seleccionar EXACTAMENTE "carcinoma ductal infiltrante grado 2".
 - Si no hay informe quirúrgico (ESCIS), deja los campos de GANGLIO CENTINELA y VACIAMIENTO AXILAR TOTALMENTE VACÍOS ("").
 - MAMOGRAFIAS_PREVIAS_1 y MAMOGRAFIAS_PREVIAS_2 deben quedar SIEMPRE VACÍAS ("").
 
@@ -135,7 +155,7 @@ if uploaded_files and api_key:
                     text = "\n".join([page.extract_text() or "" for page in reader.pages])
                     texts[f.name] = text
 
-                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones:\n\n{json.dumps(texts, ensure_ascii=False)}"
+                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo strictly las instrucciones:\n\n{json.dumps(texts, ensure_ascii=False)}"
 
                 model_candidates = get_available_models(clean_api_key)
                 extracted_text = None
