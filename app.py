@@ -3,26 +3,25 @@ import pandas as pd
 import streamlit as st
 
 # ------------------------------------------------------------------------------
-# 1. CONFIGURACIÓN DE LA PÁGINA E INICIALIZACIÓN DEL ESTADO (SESSION STATE)
+# 1. CONFIGURACIÓN E INICIALIZACIÓN DE LA SESIÓN
 # ------------------------------------------------------------------------------
 st.set_page_config(page_title="Procesador de Informes de Pacientes", page_icon="📑", layout="wide")
 
-st.title("📑 Procesador de Informes de Pacientes y Registro Excel")
+st.title("📑 Procesador de Informes de Pacientes")
 
-# Clave dinámica para reiniciar el selector de PDFs sin perder el estado global
+# Claves de estado
 if "pdf_uploader_key" not in st.session_state:
     st.session_state.pdf_uploader_key = 0
 
-# DataFrame acumulado que guardará todos los casos procesados
 if "excel_acumulado" not in st.session_state:
     st.session_state.excel_acumulado = None
 
+# Nuevo estado para guardar la vista previa temporal que puedes editar
+if "datos_previsualizacion" not in st.session_state:
+    st.session_state.datos_previsualizacion = None
 
-# ------------------------------------------------------------------------------
-# 2. FUNCIÓN AUXILIAR PARA GENERAR EL EXCEL EN MEMORIA
-# ------------------------------------------------------------------------------
+
 def convertir_df_a_excel(df):
-    """Convierte un DataFrame de pandas a bytes binarios de un archivo .xlsx"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Registro_Pacientes")
@@ -30,13 +29,12 @@ def convertir_df_a_excel(df):
 
 
 # ------------------------------------------------------------------------------
-# 3. INTERFAZ DE USUARIO - ENTRADA DE ARCHIVOS
+# 2. ENTRADA DE ARCHIVOS
 # ------------------------------------------------------------------------------
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. Informes PDF (Caso Actual)")
-    # El selector de PDFs usa la clave dinámica para ser limpiado al reiniciar
     archivos_pdf = st.file_uploader(
         "Sube los informes PDF del paciente:",
         type=["pdf"],
@@ -46,14 +44,11 @@ with col1:
 
 with col2:
     st.subheader("2. Archivo Excel Registro (Base u Opcional)")
-    
-    # Si ya hay un Excel acumulado en la sesión, mostramos su estado actual
     if st.session_state.excel_acumulado is not None:
-        st.success(f"📊 Excel activo con {len(st.session_state.excel_acumulado)} registros.")
-        with st.expander("Ver vista previa del Excel acumulado"):
-            st.dataframe(st.session_state.excel_acumulado.tail(5))
+        st.success(f"📊 Excel activo con {len(st.session_state.excel_acumulado)} registros acumulados.")
+        with st.expander("Ver contenido del Excel acumulado"):
+            st.dataframe(st.session_state.excel_acumulado)
     else:
-        # Si es la primera vez, permite cargar un Excel existente desde el equipo
         excel_subido = st.file_uploader(
             "Carga un Excel base existente (opcional):",
             type=["xlsx"],
@@ -63,46 +58,79 @@ with col2:
             st.session_state.excel_acumulado = pd.read_excel(excel_subido)
             st.rerun()
 
+st.divider()
+
+# ------------------------------------------------------------------------------
+# 3. PASO 1: LEER PDF Y EXTRAER A PREVISUALIZACIÓN
+# ------------------------------------------------------------------------------
+if st.button("🔍 1. Leer y Previsualizar PDF", type="primary", use_container_width=True):
+    if archivos_pdf:
+        with st.spinner("Leyendo informe y preparando datos para revisión..."):
+            # ==================================================================
+            # AQUÍ SE EJECUTA LA EXTRACCIÓN DE TU PDF
+            # Reemplaza esta simulación por la llamada a tu función/IA de lectura
+            # ==================================================================
+            nombres_archivos = ", ".join([f.name for f in archivos_pdf])
+            
+            # Generamos la fila extraída como DataFrame borrador
+            df_extraido = pd.DataFrame([{
+                "Paciente": "Nombre Paciente (Editar aquí)",
+                "Fecha": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                "Archivos": nombres_archivos,
+                "Observaciones": "Revisar datos extraídos"
+            }])
+            
+            st.session_state.datos_previsualizacion = df_extraido
+            st.rerun()
+    else:
+        st.warning("⚠️ Por favor, sube al menos un archivo PDF primero.")
+
+
+# ------------------------------------------------------------------------------
+# 4. PASO 2: EDITAR / CORREGIR DATOS Y CONFIRMAR EN EL EXCEL
+# ------------------------------------------------------------------------------
+if st.session_state.datos_previsualizacion is not None:
+    st.info("✏️ **Previsualización del nuevo caso:** Haz doble clic sobre cualquier celda para corregir la información antes de guardar.")
+    
+    # Editor interactivo para corregir celdas directamente en la pantalla
+    df_editado = st.data_editor(
+        st.session_state.datos_previsualizacion,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editor_datos_caso"
+    )
+
+    col_conf1, col_conf2 = st.columns([2, 1])
+    
+    with col_conf1:
+        if st.button("✅ 2. Confirmar y Añadir este caso al Excel", use_container_width=True):
+            # Guardamos los datos corregidos en el Excel acumulado
+            if st.session_state.excel_acumulado is not None:
+                st.session_state.excel_acumulado = pd.concat(
+                    [st.session_state.excel_acumulado, df_editado],
+                    ignore_index=True
+                )
+            else:
+                st.session_state.excel_acumulado = df_editado
+            
+            # Limpiamos la previsualización del borrador
+            st.session_state.datos_previsualizacion = None
+            st.success("¡Caso guardado correctamente en la tabla acumulada!")
+            st.rerun()
+            
+    with col_conf2:
+        if st.button("❌ Descartar este borrador", use_container_width=True):
+            st.session_state.datos_previsualizacion = None
+            st.rerun()
 
 st.divider()
 
 # ------------------------------------------------------------------------------
-# 4. PROCESAMIENTO Y ACCIONES
+# 5. DESCARGAR Y REINICIAR
 # ------------------------------------------------------------------------------
-col_acciones1, col_acciones2, col_acciones3 = st.columns(3)
+col_pie1, col_pie2 = st.columns(2)
 
-# --- BOTÓN 1: PROCESAR PACIENTE ACTUAL ---
-with col_acciones1:
-    if st.button("⚡ Procesar y Actualizar Excel", use_container_width=True):
-        if archivos_pdf:
-            with st.spinner("Procesando información del PDF..."):
-                # ==============================================================
-                # AQUÍ IRÍA TU LÓGICA / API PARA EXTRAER LOS DATOS DEL PDF
-                # Ejemplo simulado de extracción de datos:
-                # ==============================================================
-                nombres_archivos = ", ".join([f.name for f in archivos_pdf])
-                nuevos_datos = pd.DataFrame([{
-                    "Fecha_Procesamiento": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
-                    "Archivos_Informes": nombres_archivos,
-                    "Estado": "Completado"
-                }])
-
-                # Concatenamos con el Excel acumulado o creamos uno nuevo
-                if st.session_state.excel_acumulado is not None:
-                    st.session_state.excel_acumulado = pd.concat(
-                        [st.session_state.excel_acumulado, nuevos_datos],
-                        ignore_index=True
-                    )
-                else:
-                    st.session_state.excel_acumulado = nuevos_datos
-
-                st.success("¡Datos extraídos y añadidos al Excel!")
-                st.rerun()
-        else:
-            st.warning("⚠️ Por favor, sube al menos un informe PDF.")
-
-# --- BOTÓN 2: DESCARGAR EXCEL ACTUALIZADO ---
-with col_acciones2:
+with col_pie1:
     if st.session_state.excel_acumulado is not None:
         excel_bytes = convertir_df_a_excel(st.session_state.excel_acumulado)
         st.download_button(
@@ -111,15 +139,14 @@ with col_acciones2:
             file_name="Registro_Pacientes_Actualizado.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
-            key="boton_descarga_excel",
+            key="boton_descarga_final"
         )
     else:
         st.button("📥 Descargar Excel Actualizado", disabled=True, use_container_width=True)
 
-# --- BOTÓN 3: REINICIAR / NUEVO PACIENTE ---
-with col_acciones3:
+with col_pie2:
     if st.button("🔄 Reiniciar / Nuevo paciente", use_container_width=True):
-        # 1. Cambiamos la clave para vaciar únicamente la casilla de subida de PDFs
+        # Limpia los PDFs y la vista previa borrador, pero conserva el Excel acumulado
         st.session_state.pdf_uploader_key += 1
-        # 2. Recargamos la interfaz sin borrar st.session_state.excel_acumulado
+        st.session_state.datos_previsualizacion = None
         st.rerun()
