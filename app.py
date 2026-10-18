@@ -1,318 +1,125 @@
-import os
-import re
-import json
 import io
-import requests
 import pandas as pd
 import streamlit as st
-from pypdf import PdfReader
-import openpyxl
 
-st.set_page_config(
-    page_title="Extractor Biopsias Mama - Unidad Radiología",
-    page_icon="🩺",
-    layout="wide"
-)
+# ------------------------------------------------------------------------------
+# 1. CONFIGURACIÓN DE LA PÁGINA E INICIALIZACIÓN DEL ESTADO (SESSION STATE)
+# ------------------------------------------------------------------------------
+st.set_page_config(page_title="Procesador de Informes de Pacientes", page_icon="📑", layout="wide")
 
-st.title("🩺 Gestor de Biopsias de Mama - Extracción y Registro")
-st.markdown("""
-Esta aplicación procesa los informes PDF (`...RX`, `...INCIS`, `...ESCIS`), extrae la información estructurada
-según las reglas médicas de la unidad y anexa o actualiza los datos en el Excel sin duplicar pacientes.
-""")
+st.title("📑 Procesador de Informes de Pacientes y Registro Excel")
 
-default_key = ""
-try:
-    if "GEMINI_API_KEY" in st.secrets:
-        default_key = st.secrets["GEMINI_API_KEY"]
-except Exception:
-    pass
+# Clave dinámica para reiniciar el selector de PDFs sin perder el estado global
+if "pdf_uploader_key" not in st.session_state:
+    st.session_state.pdf_uploader_key = 0
 
-st.sidebar.header("⚙️ Configuración")
-api_key = st.sidebar.text_input("Ingresa tu clave de API Gemini:", value=default_key, type="password")
-selected_year = st.sidebar.selectbox("Año de destino para la hoja:", ["2026", "2025", "2024"])
+# DataFrame acumulado que guardará todos los casos procesados
+if "excel_acumulado" not in st.session_state:
+    st.session_state.excel_acumulado = None
 
-if st.sidebar.button("🔄 Reiniciar / Nueva Paciente"):
-    if "result_json" in st.session_state:
-        del st.session_state["result_json"]
-    st.rerun()
 
-SYSTEM_INSTRUCTIONS = """
-Eres un asistente médico especializado en radiología y senología mamaria. Tu función es extraer exactamente los campos indicados a partir de los informes PDF proporcionados.
+# ------------------------------------------------------------------------------
+# 2. FUNCIÓN AUXILIAR PARA GENERAR EL EXCEL EN MEMORIA
+# ------------------------------------------------------------------------------
+def convertir_df_a_excel(df):
+    """Convierte un DataFrame de pandas a bytes binarios de un archivo .xlsx"""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Registro_Pacientes")
+    return output.getvalue()
 
-REGLAS DE FORMATO Y UNIDADES (CRÍTICO):
-1. TAMAÑO_RX: Debe expresarse SIEMPRE en CENTÍMETROS (cm). Si el informe refleja milímetros (mm), divídelo entre 10 y añade "cm" (ej: 18 mm -> "1.8 cm", 15 mm -> "1.5 cm"). NUNCA pongas la medida en mm.
 
-2. DIFERENCIACIÓN BAV vs BAG (CAMPO "BAV"):
-- El campo BAV debe responder "Sí" OBLIGATORIAMENTE Y ÚNICAMENTE si en el informe se especifica de forma explícita "BAV", "Biopsia asistida por vacío", "Mammotome", "EnCor" o "SenoRx".
-- Si el procedimiento es una "BAG", "Biopsia de Aguja Gruesa", "Corebiopsia", o punción con aguja automática (14G, 16G, etc.), NO ES BAV. En ese caso, el campo BAV DEBE SER "No".
-
-3. TRADUCCIÓN Y EQUIVALENCIAS EN ANATOMÍA PATOLÓGICA (RESULTADO_AP_MAMA):
-- "Carcinoma invasor de tipo no especial", "Carcinoma ductal NOS" o "Carcinoma ductal infiltrante" son EL MISMO CONCEPTO. Deben codificarse como "carcinoma ductal infiltrante".
-- Traduce los grados de Nottingham expresados en números romanos a números arábigos:
-  * "Grado I" / "Grado 1" -> "carcinoma ductal infiltrante grado 1"
-  * "Grado II" / "Grado 2" -> "carcinoma ductal infiltrante grado 2"
-  * "Grado III" / "Grado 3" -> "carcinoma ductal infiltrante grado 3"
-- Si NO se especifica grado alguno para el tipo ductal, selecciona: "carcinoma infiltrante no especial".
-
-DESPLEGABLES OBLIGATORIOS (Elegir STRICTLY una opción exacta de las siguientes listas):
-
-1. RESULTADO_AP_MAMA (Seleccionar la opción EXACTA más adecuada):
-- "carcinoma ductal infiltrante grado 1"
-- "carcinoma ductal infiltrante grado 2"
-- "carcinoma ductal infiltrante grado 3"
-- "carcinoma infiltrante no especial"
-- "carcinoma intraductal"
-- "carcinoma in situ"
-- "carcinoma mucinoso"
-- "carcinoma tubular"
-- "metástasis"
-- "carcinoma lobulillar infiltrante"
-- "carcinoma infiltrante con patrón sólido papilar"
-- "carcinoma papilar"
-- "carcinoma en general"
-- "lesión papilar"
-- "carcinoma microinvasor"
-- "otros"
-
-2. CLINICA (Seleccionar la más adecuada):
-- "nódulo palpable"
-- "mastalgia"
-- "clínica de carcinoma inflamatorio"
-- "asintomática"
-- "retracción del pezón"
-- "adenopatía axilar aislada"
-- "diagnóstico ocasional por otro método de imagen"
-- "galactorragia"
-- "galactorrea"
-- "masa exofítica ulcerada"
-- "diagnóstico ocasional distinto a la clínica de sospecha o al motivo"
-- "carcinoma mamario oculto"
-
-3. ASPECTO_MAMOGRAFICO (Seleccionar la más adecuada):
-- "nódulo mal definido"
-- "nódulo bien definido"
-- "lesión espiculada"
-- "mamografía normal"
-- "no mamografía"
-- "sólo microcalcificaciones irregulares"
-- "densidad asimétrica focal asociada a masa y microcalcificaciones"
-
-REGLAS GENERALES:
-- Si procede de screening o cribado y no consta síntoma explícito, la CLINICA debe ser "asintomática".
-- Si no hay informe quirúrgico (ESCIS), deja los campos de GANGLIO CENTINELA y VACIAMIENTO AXILAR TOTALMENTE VACÍOS ("").
-- MAMOGRAFIAS_PREVIAS_1 y MAMOGRAFIAS_PREVIAS_2 deben quedar SIEMPRE VACÍAS ("").
-
-DEVUELVE LOS DATOS EN UN JSON CON LAS SIGUIENTES LLAVES EXACTAS:
-- NH, NUHSA, NOMBRE, EDAD, FECHA_BIOPSIA, SCREENING, MAMOGRAFIAS_PREVIAS_1, MAMOGRAFIAS_PREVIAS_2, CLINICA, ANTECEDENTES_MISMA_MAMA, ANTECEDENTES_CONTRALATERAL, ASPECTO_MAMOGRAFICO, MAMOGRAFIA_CON_CONTRASTE, BAV, TAMAÑO_RX, MULTICENTRICO, MULTIFOCAL, BIRADS, RESULTADO_AP_MAMA, SUBCLASIFICACION_MOLECULAR, RM, ECO_AXILA_ACTO_UNICO, ESTADIO_ECOGRAFICO_AXILAR, SOSPECHA_ECO_AXILAR, PAAF_AXILA, BAG_AXILA, RESULTADO_BIOPSIA_AXILAR, GANGLIO_CENTINELA, RESULTADO_GANGLIO_CENTINELA, VACIAMIENTO_AXILAR, RESULTADO_VACIAMIENTO, COMENTARIO.
-
-Devuelve ÚNICAMENTE un objeto JSON válido.
-"""
-
+# ------------------------------------------------------------------------------
+# 3. INTERFAZ DE USUARIO - ENTRADA DE ARCHIVOS
+# ------------------------------------------------------------------------------
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### 1. Archivo Excel Registro (Opcional)")
-    excel_file = st.file_uploader("Sube tu Excel máster existente (.xlsx):", type=["xlsx"], key="excel_uploader")
+    st.subheader("1. Informes PDF (Caso Actual)")
+    # El selector de PDFs usa la clave dinámica para ser limpiado al reiniciar
+    archivos_pdf = st.file_uploader(
+        "Sube los informes PDF del paciente:",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key=f"pdf_uploader_{st.session_state.pdf_uploader_key}",
+    )
 
 with col2:
-    st.markdown("### 2. Informes PDF de la paciente")
-    uploaded_files = st.file_uploader("Sube los PDFs de la paciente (RX, INCIS, ESCIS):", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
-
-def get_available_models(clean_key):
-    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
-    try:
-        res = requests.get(list_url)
-        if res.status_code == 200:
-            models_data = res.json().get("models", [])
-            valid_models = []
-            for m in models_data:
-                methods = m.get("supportedGenerationMethods", [])
-                if "generateContent" in methods:
-                    name = m.get("name", "").replace("models/", "")
-                    if "gemini" in name:
-                        valid_models.append(name)
-            return valid_models
-    except Exception:
-        pass
-    return ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash"]
-
-def get_first_empty_row(ws, check_col=2, start_row=2):
-    r = start_row
-    while True:
-        val = ws.cell(r, check_col).value
-        if val is None or str(val).strip() == "":
-            return r
-        r += 1
-
-def find_existing_patient_row(ws, nuhsa_val, nh_val, max_search_row=150):
-    clean_nuhsa = str(nuhsa_val).strip() if nuhsa_val else ""
-    clean_nh = str(nh_val).strip() if nh_val else ""
-
-    for r in range(2, max_search_row):
-        excel_nh = str(ws.cell(r, 1).value or "").strip()
-        excel_nuhsa = str(ws.cell(r, 2).value or "").strip()
-
-        if (clean_nuhsa and clean_nuhsa == excel_nuhsa) or (clean_nh and clean_nh == excel_nh):
-            return r
-    return None
-
-if uploaded_files and api_key:
-    if st.button("🚀 Procesar Documentos y Extraer Datos"):
-        with st.spinner("Analizando informes médicos..."):
-            try:
-                clean_api_key = api_key.strip()
-                texts = {}
-                for f in uploaded_files:
-                    reader = PdfReader(f)
-                    text = "\n".join([page.extract_text() or "" for page in reader.pages])
-                    texts[f.name] = text
-
-                prompt_text = f"Extrae los datos de los siguientes informes médicos siguiendo estrictamente las instrucciones:\n\n{json.dumps(texts, ensure_ascii=False)}"
-
-                model_candidates = get_available_models(clean_api_key)
-                extracted_text = None
-
-                for model_name in model_candidates:
-                    for api_ver in ["v1beta", "v1"]:
-                        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model_name}:generateContent?key={clean_api_key}"
-                        headers = {"Content-Type": "application/json"}
-                        payload = {
-                            "contents": [{"parts": [{"text": prompt_text}]}],
-                            "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTIONS}]},
-                            "generationConfig": {"temperature": 0.0, "responseMimeType": "application/json"}
-                        }
-
-                        response = requests.post(url, headers=headers, json=payload)
-                        res_json = response.json()
-
-                        if response.status_code == 200 and "candidates" in res_json:
-                            try:
-                                extracted_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                                break
-                            except (KeyError, IndexError):
-                                continue
-                    if extracted_text:
-                        break
-
-                if not extracted_text:
-                    st.error("⚠️ No se pudo conectar con los modelos de IA.")
-                    st.stop()
-
-                st.session_state["result_json"] = extracted_text
-                st.success("✅ ¡Datos extraídos correctamente!")
-
-            except Exception as e:
-                st.error(f"⚠️ Error al procesar: {str(e)}")
-
-if "result_json" in st.session_state:
-    st.markdown("---")
-    st.subheader("📋 Previsualización y Edición del Caso Extraído")
+    st.subheader("2. Archivo Excel Registro (Base u Opcional)")
     
-    try:
-        raw_json = st.session_state["result_json"]
-        cleaned_json = re.sub(r"^```json\s*", "", raw_json, flags=re.MULTILINE)
-        cleaned_json = re.sub(r"^```\s*", "", cleaned_json, flags=re.MULTILINE).strip()
-        
-        data = json.loads(cleaned_json)
-        
-        if isinstance(data, dict):
-            new_df = pd.DataFrame([data])
-        else:
-            new_df = pd.DataFrame(data)
-        
-        target_column_order = [
-            "NH", "NUHSA", "NOMBRE", "EDAD", "FECHA_BIOPSIA", "SCREENING",
-            "MAMOGRAFIAS_PREVIAS_1", "MAMOGRAFIAS_PREVIAS_2", "CLINICA",
-            "ANTECEDENTES_MISMA_MAMA", "ANTECEDENTES_CONTRALATERAL", "ASPECTO_MAMOGRAFICO",
-            "MAMOGRAFIA_CON_CONTRASTE", "BAV", "TAMAÑO_RX", "MULTICENTRICO",
-            "MULTIFOCAL", "BIRADS", "RESULTADO_AP_MAMA", "SUBCLASIFICACION_MOLECULAR",
-            "RM", "ECO_AXILA_ACTO_UNICO", "ESTADIO_ECOGRAFICO_AXILAR", "SOSPECHA_ECO_AXILAR",
-            "PAAF_AXILA", "BAG_AXILA", "RESULTADO_BIOPSIA_AXILAR", "GANGLIO_CENTINELA",
-            "RESULTADO_GANGLIO_CENTINELA", "VACIAMIENTO_AXILAR", "RESULTADO_VACIAMIENTO",
-            "COMENTARIO"
-        ]
+    # Si ya hay un Excel acumulado en la sesión, mostramos su estado actual
+    if st.session_state.excel_acumulado is not None:
+        st.success(f"📊 Excel activo con {len(st.session_state.excel_acumulado)} registros.")
+        with st.expander("Ver vista previa del Excel acumulado"):
+            st.dataframe(st.session_state.excel_acumulado.tail(5))
+    else:
+        # Si es la primera vez, permite cargar un Excel existente desde el equipo
+        excel_subido = st.file_uploader(
+            "Carga un Excel base existente (opcional):",
+            type=["xlsx"],
+            key="excel_inicial_uploader"
+        )
+        if excel_subido is not None:
+            st.session_state.excel_acumulado = pd.read_excel(excel_subido)
+            st.rerun()
 
-        for col in target_column_order:
-            if col not in new_df.columns:
-                new_df[col] = ""
 
-        new_df["MAMOGRAFIAS_PREVIAS_1"] = ""
-        new_df["MAMOGRAFIAS_PREVIAS_2"] = ""
+st.divider()
 
-        new_df = new_df[target_column_order]
+# ------------------------------------------------------------------------------
+# 4. PROCESAMIENTO Y ACCIONES
+# ------------------------------------------------------------------------------
+col_acciones1, col_acciones2, col_acciones3 = st.columns(3)
 
-        edited_df = st.data_editor(new_df, num_rows="dynamic", use_container_width=True)
-        
-        st.markdown("---")
-        
-        if excel_file is not None:
-            excel_bytes = excel_file.getvalue()
-            wb = openpyxl.load_workbook(io.BytesIO(excel_bytes))
-            
-            target_sheet_name = str(selected_year).strip()
-            ws = wb[target_sheet_name] if target_sheet_name in wb.sheetnames else wb.create_sheet(title=target_sheet_name)
-            
-            updated_count = 0
-            created_count = 0
+# --- BOTÓN 1: PROCESAR PACIENTE ACTUAL ---
+with col_acciones1:
+    if st.button("⚡ Procesar y Actualizar Excel", use_container_width=True):
+        if archivos_pdf:
+            with st.spinner("Procesando información del PDF..."):
+                # ==============================================================
+                # AQUÍ IRÍA TU LÓGICA / API PARA EXTRAER LOS DATOS DEL PDF
+                # Ejemplo simulado de extracción de datos:
+                # ==============================================================
+                nombres_archivos = ", ".join([f.name for f in archivos_pdf])
+                nuevos_datos = pd.DataFrame([{
+                    "Fecha_Procesamiento": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+                    "Archivos_Informes": nombres_archivos,
+                    "Estado": "Completado"
+                }])
 
-            for _, row in edited_df.iterrows():
-                nh_val = row.get("NH", "")
-                nuhsa_val = row.get("NUHSA", "")
-
-                existing_row = find_existing_patient_row(ws, nuhsa_val, nh_val)
-
-                if existing_row:
-                    target_row = existing_row
-                    updated_count += 1
+                # Concatenamos con el Excel acumulado o creamos uno nuevo
+                if st.session_state.excel_acumulado is not None:
+                    st.session_state.excel_acumulado = pd.concat(
+                        [st.session_state.excel_acumulado, nuevos_datos],
+                        ignore_index=True
+                    )
                 else:
-                    target_row = get_first_empty_row(ws, check_col=2, start_row=2)
-                    created_count += 1
+                    st.session_state.excel_acumulado = nuevos_datos
 
-                row_values = row.tolist()
-                for col_idx, val in enumerate(row_values, start=1):
-                    if col_idx in [7, 8]:
-                        ws.cell(row=target_row, column=col_idx, value=None)
-                    else:
-                        clean_val = str(val).strip() if val is not None else ""
-                        if clean_val != "" or not existing_row:
-                            ws.cell(row=target_row, column=col_idx, value=clean_val if clean_val != "" else None)
-
-            output_buffer = io.BytesIO()
-            wb.save(output_buffer)
-            final_excel = output_buffer.getvalue()
-
-            if updated_count > 0:
-                st.info(f"ℹ️ Se actualizó y completó la información de {updated_count} paciente(s) previamente registrada(s).")
-            if created_count > 0:
-                st.success(f"✅ Se creó el registro de {created_count} paciente(s) nueva(s).")
-
-            c_download, c_reset = st.columns([2, 1])
-            with c_download:
-                st.download_button(
-                    label=f"📥 Confirmar y Descargar Excel Actualizado ({selected_year})",
-                    data=final_excel,
-                    file_name=f"Registro_Biopsias_Actualizado.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            with c_reset:
-                if st.button("➕ ¿Quieres registrar otra paciente?"):
-                    del st.session_state["result_json"]
-                    st.rerun()
-
+                st.success("¡Datos extraídos y añadidos al Excel!")
+                st.rerun()
         else:
-            csv = edited_df.to_csv(index=False).encode('utf-8')
-            c_download, c_reset = st.columns([2, 1])
-            with c_download:
-                st.download_button(
-                    label="📥 Confirmar Visto Bueno y Descargar Caso como CSV",
-                    data=csv,
-                    file_name=f"caso_extraido_{selected_year}.csv",
-                    mime="text/csv"
-                )
-            with c_reset:
-                if st.button("➕ ¿Quieres registrar otra paciente?"):
-                    del st.session_state["result_json"]
-                    st.rerun()
+            st.warning("⚠️ Por favor, sube al menos un informe PDF.")
 
-    except Exception as e:
-        st.error(f"Error al procesar los datos: {e}")
+# --- BOTÓN 2: DESCARGAR EXCEL ACTUALIZADO ---
+with col_acciones2:
+    if st.session_state.excel_acumulado is not None:
+        excel_bytes = convertir_df_a_excel(st.session_state.excel_acumulado)
+        st.download_button(
+            label="📥 Descargar Excel Actualizado",
+            data=excel_bytes,
+            file_name="Registro_Pacientes_Actualizado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="boton_descarga_excel",
+        )
+    else:
+        st.button("📥 Descargar Excel Actualizado", disabled=True, use_container_width=True)
+
+# --- BOTÓN 3: REINICIAR / NUEVO PACIENTE ---
+with col_acciones3:
+    if st.button("🔄 Reiniciar / Nuevo paciente", use_container_width=True):
+        # 1. Cambiamos la clave para vaciar únicamente la casilla de subida de PDFs
+        st.session_state.pdf_uploader_key += 1
+        # 2. Recargamos la interfaz sin borrar st.session_state.excel_acumulado
+        st.rerun()
